@@ -432,7 +432,7 @@ function computePlan(state,expeditions){
  const monthEarn=add(zero(),weeklyEarn,MONTH_WEEKS),monthCost=add(zero(),weeklyCost,MONTH_WEEKS);
  let monthRuns=weekRuns*MONTH_WEEKS,monthUnknown=weekUnknown*MONTH_WEEKS,monthMinutes=weekMinutes*MONTH_WEEKS;const warnings=[];
  if(Math.abs(allocDays-7)>1e-8)warnings.push(`週間の割当が ${allocDays} / 7日です。未割当日は計算に含みません。`);
- const available=Object.fromEntries(Object.entries(dayMap).map(([id,days])=>[id,days*MONTH_WEEKS]));
+ const available=Object.fromEntries(Object.entries(dayMap).map(([id,days])=>[id,days*MONTH_WEEKS])),monthlyDays={...available};
  for(const x of state.exceptions||[]){const replacement=recurring[x.presetId],origin=recurring[x.replaceId];if(!replacement||!origin)continue;
    const desired=clamp(x.count,0,31);const allowed=Math.min(desired,available[x.replaceId]||0);available[x.replaceId]-=allowed;
    if(allowed<desired)warnings.push(`月間例外「${x.name||'名称なし'}」は、置換元の日数を超えるため ${allowed.toFixed(2)}日で計上しました。`);
@@ -441,10 +441,10 @@ function computePlan(state,expeditions){
    monthRuns+=allowed*(replacement.runs-origin.runs);
    monthUnknown+=allowed*(replacement.unestimated-origin.unestimated);
    monthMinutes+=allowed*(replacement.occupation.totalMinutes-origin.occupation.totalMinutes);
-   available[x.presetId]=(available[x.presetId]||0)+allowed;
+   monthlyDays[x.replaceId]=(monthlyDays[x.replaceId]||0)-allowed;monthlyDays[x.presetId]=(monthlyDays[x.presetId]||0)+allowed;
  }
  const once=sumMonthly(state.monthlyRows,fleets,settings,expeditions);
- const monthly=monthlyAllocation(state,expeditions,available,1,warnings);add(monthEarn,monthly.earned);add(monthCost,monthly.cost);monthRuns+=monthly.runs;monthUnknown+=monthly.unestimated;monthMinutes+=monthly.minutes;
+ const monthly=monthlyAllocation(state,expeditions,monthlyDays,1,warnings);add(monthEarn,monthly.earned);add(monthCost,monthly.cost);monthRuns+=monthly.runs;monthUnknown+=monthly.unestimated;monthMinutes+=monthly.minutes;
  const yearEarn=add(zero(),monthEarn,12),yearCost=add(zero(),monthCost,12);
  return {
    weekly:{earned:weeklyEarn,cost:weeklyCost,runs:weekRuns,unestimated:weekUnknown,minutes:weekMinutes},
@@ -914,7 +914,8 @@ function renderScheduler(){
  const audit=E.scheduleAudit(p,EXP);
  const status=`<section class="panel section"><div class="row-between"><div><h2>出発予定</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><div class="row-wrap">${button('schedule-sort','艦隊・時刻順','btn',`data-pid="${esc(p.id)}"`)}<span class="chip ${audit.complete?'green':'amber'}">${audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div></div>
  <div class="sumstrip"><span><strong>1日分の獲得期待値：</strong>${['fuel','ammo','steel','bauxite'].map((k,i)=>`${['燃','弾','鋼','ボ'][i]} ${fmt(period.earned[k])}`).join(' ／ ')}</span><span class="muted">${E.formatOccupation(period.occupation.totalMinutes)} / 延べ</span></div>
- <p class="note">この金額は予定が未配置でもプリセット内の全遠征を集計した値です。編成未登録時は補給費を差し引いていません。</p>
+ <p class="note">この金額は予定が未配置でもプリセット内の全遠征を集計した値です。編成未登録時は補給費を差し引いていません。月次遠征は運用設定で暦月1回までの概算計上となります。</p>
+ ${[...new Set(audit.runs.filter(x=>x.exp.monthly&&audit.runs.filter(y=>y.exp.id===x.exp.id).length>1).map(x=>x.exp.name))].map(name=>`<div class="warning">月次遠征「${esc(name)}」が同じプリセットに複数あります。</div>`).join('')}
  ${audit.hard.map(x=>`<div class="warning">要確認（登録済み）：${esc(x)}</div>`).join('')}
  ${audit.soft.map(x=>`<div class="notice">艦娘編成の重複：${esc(x)}</div>`).join('')}
  ${audit.runs.filter(x=>x.start!==null&&x.start!==undefined&&x.start!==''&&E.nextAvailableMinute(p,E.dayAbsoluteMinute(x.start,dayStart))>E.dayAbsoluteMinute(x.start,dayStart)).map(x=>`<div class="notice">${esc(x.exp.name)}（${esc(E.clockString(E.dayAbsoluteMinute(x.start,dayStart)))}発）は、触れない時間帯に出発する設定です。</div>`).join('')}
@@ -924,7 +925,7 @@ function renderScheduler(){
 }
 
 function renderMappingGroups(rows,monthly,presetId){
- const occ=E.occupationForRows(rows,state.fleets,EXP,monthly);
+ const occ=E.occupationForRows(rows,state.fleets,EXP,monthly?true:null);
  const groupDefs=[...state.fleets.map(f=>({id:String(f.id),name:f.name})),{id:'',name:'編成なし'}];
  return groupDefs.map(g=>{
    const list=rows.filter(r=>String(r.fleetId||'')===g.id || (g.id===''&&!fleetById(r.fleetId)));
@@ -1041,15 +1042,15 @@ function renderCompare(){
  if(!snaps.some(x=>x.id===ui.compareB))ui.compareB='current';
  const get=(id)=>id==='current'?state:snaps.find(x=>x.id===id)?.data||state;
  const a=E.computePlan(get(ui.compareA),EXP),b=E.computePlan(get(ui.compareB),EXP);
- const months=['weekly','monthly','yearly'];const t=ui.period;const ea=a[t],eb=b[t];
+ const months=['weekly','monthly','yearly'];const t=ui.period,simple=ui.compareMode==='simple';const ea=simple?E.simpleCalculate(get(ui.compareA).simpleBlocks||[],get(ui.compareA).settings,EXP).total:a[t],eb=simple?E.simpleCalculate(get(ui.compareB).simpleBlocks||[],get(ui.compareB).settings,EXP).total:b[t];
  return `<div class="stack"><section class="panel section"><div class="sectionhead"><div><h2>条件の一時保存と比較</h2><p>編成・プリセット・適用日数を含めて最大8件保持。同じタブ内だけの一時保存です。</p></div>${button('save-snapshot','+ 現在条件を保存','btn primary')}</div>
  ${snaps.length?`<table class="monthtable"><thead><tr><th>保存済み条件</th><th>操作</th></tr></thead><tbody>${snaps.map(s=>`<tr><td><span class="strong">${esc(s.name)}</span><span class="subtle"> · ${esc(s.savedAt)}</span></td><td><div class="row-wrap" style="justify-content:flex-end">${button('restore-snapshot','復元','btn tiny',`data-sid="${esc(s.id)}"`)}${button('delete-snapshot','削除','btn tiny danger',`data-sid="${esc(s.id)}"`)}</div></td></tr>`).join('')}</tbody></table>`:'<div class="empty">まだ保存した比較条件はありません。</div>'}
  <div class="compare-grid" style="margin-top:17px"><div class="field"><label>比較元 A</label><select data-change="compareA">${options(all,ui.compareA)}</select></div><div class="field"><label>比較先 B</label><select data-change="compareB">${options(all,ui.compareB)}</select></div></div>
- <p class="note">差分は B − A で表示します。週間は基本運用、月間・年間は例外と月次遠征も含めます。</p>
- <div style="overflow-x:auto"><table class="difftable"><thead><tr><th>項目（${{weekly:'週間',monthly:'月間',yearly:'年間'}[t]}）</th><th>条件 A</th><th>条件 B</th><th>差分 B−A</th></tr></thead><tbody>
+ <div class="row-wrap"><label>比較対象 <select data-change="compareMode">${options([{value:"plan",label:"運用計画"},{value:"simple",label:"簡易計算"}],ui.compareMode||"plan")}</select></label></div><p class="note">差分は B − A で表示します。${simple?"簡易計算は全条件の合計を比較します。":"運用計画は選択期間の収支を比較します。"}</p>
+ <div style="overflow-x:auto"><table class="difftable"><thead><tr><th>項目（${simple?'簡易計算':{weekly:'週間',monthly:'月間',yearly:'年間'}[t]}）</th><th>条件 A</th><th>条件 B</th><th>差分 B−A</th></tr></thead><tbody>
  ${[['fuel','燃料'],['ammo','弾薬'],['steel','鋼材'],['bauxite','ボーキ'],['ネジ','ネジ（期待値）']].map(([key,label])=>{const d=eb.earned[key]-ea.earned[key];return `<tr><td>${label}</td><td>${fmt(ea.earned[key])}</td><td>${fmt(eb.earned[key])}</td><td class="${d>0?'positive':d<0?'negative':''}">${signed(d)}</td></tr>`}).join('')}
  <tr><td>遠征回数</td><td>${fmt(ea.runs)}</td><td>${fmt(eb.runs)}</td><td class="${eb.runs-ea.runs>0?'positive':eb.runs-ea.runs<0?'negative':''}">${signed(eb.runs-ea.runs)}</td></tr>
- <tr><td>延べ占有時間</td><td>${fmt(ea.minutes/60)} 時間</td><td>${fmt(eb.minutes/60)} 時間</td><td>${signed((eb.minutes-ea.minutes)/60)} 時間</td></tr>
+ ${simple?'':`<tr><td>延べ占有時間</td><td>${fmt(ea.minutes/60)} 時間</td><td>${fmt(eb.minutes/60)} 時間</td><td>${signed((eb.minutes-ea.minutes)/60)} 時間</td></tr>`}
  <tr><td>純収支（燃料）</td><td>${ea.unestimated?'未計算':fmt(ea.earned.fuel-ea.cost.fuel)}</td><td>${eb.unestimated?'未計算':fmt(eb.earned.fuel-eb.cost.fuel)}</td><td>${ea.unestimated||eb.unestimated?'—':signed((eb.earned.fuel-eb.cost.fuel)-(ea.earned.fuel-ea.cost.fuel))}</td></tr>
  <tr><td>純収支（弾薬）</td><td>${ea.unestimated?'未計算':fmt(ea.earned.ammo-ea.cost.ammo)}</td><td>${eb.unestimated?'未計算':fmt(eb.earned.ammo-eb.cost.ammo)}</td><td>${ea.unestimated||eb.unestimated?'—':signed((eb.earned.ammo-eb.cost.ammo)-(ea.earned.ammo-ea.cost.ammo))}</td></tr>
  </tbody></table></div></section>
@@ -1059,7 +1060,7 @@ function render(){
  const main=one('#app');
  const plan=E.computePlan(state,EXP);
  state.simpleBlocks??=[newSimpleBlock()];
- main.innerHTML=`<div class="top"><div class="container"><div class="toprow"><div><div class="brand"><div class="mark">≋</div><div><div class="eyebrow">KAN-COLLE / EXPEDITION ANALYTICS</div><h1>遠征収支シミュレータ <span class="tag">v1.6</span></h1></div></div><p class="subtitle">いつもの遠征運用を、週・月・年の資源収支に。</p></div><div class="topactions">${button('save-snapshot','条件を一時保存','btn light')}${button('export-json','JSON保存','btn light')}</div></div></div></div>
+ main.innerHTML=`<div class="top"><div class="container"><div class="toprow"><div><div class="brand"><div class="mark">≋</div><div><div class="eyebrow">KAN-COLLE / EXPEDITION ANALYTICS</div><h1>遠征収支シミュレータ <span class="tag">v1.7</span></h1></div></div><p class="subtitle">いつもの遠征運用を、週・月・年の資源収支に。</p></div><div class="topactions">${button('save-snapshot','条件を一時保存','btn light')}${button('export-json','JSON保存','btn light')}</div></div></div></div>
  <main class="container shell">${ui.tab==='simple'?'':renderOverview()}<nav class="nav" aria-label="画面切り替え">${[['simple','簡易収支計算'],['scheduler','スケジューラー'],['plan','運用設定'],['mapping','編成別遠征'],['fleet','艦隊・装備'],['compare','条件比較・保存']].map(([id,label])=>`<button type="button" data-action="tab" data-tab="${id}" class="${ui.tab===id?'active':''}">${label}</button>`).join('')}</nav>
  <div class="content">${ui.tab==='simple'?renderSimple():ui.tab==='plan'?renderPlan():ui.tab==='scheduler'?renderScheduler():ui.tab==='mapping'?renderFleetMapping():ui.tab==='fleet'?renderFleet():renderCompare()}</div>
  <footer class="footer footnotes">非公式ファンツール。艦これの運営元・攻略Wikiとは無関係です。計算は成功率100%を前提とする期待値で、キラ維持の手間・交戦遠征の修理費・ランダム獲得アイテムは算出していません。曜日・祝日方式は実際の暦を使用し、従来方式は365÷7÷12週換算です。<br>遠征データ・消費率：<a target="_blank" rel="noopener noreferrer" href="https://wikiwiki.jp/kancolle/%E9%81%A0%E5%BE%81">艦これ攻略Wiki（遠征）</a> / <a target="_blank" rel="noopener noreferrer" href="https://kouryakulab.com/ja/games/kancolle/expedition-requirements/">遠征一覧</a>。大発補正：<a href="https://wikiwiki.jp/kancolle/%E7%89%B9%E5%A4%A7%E7%99%BA%E5%8B%95%E8%89%87" rel="noopener noreferrer" target="_blank">特大発動艇</a>。</footer></main>`;
@@ -1149,7 +1150,7 @@ function handleClick(e){
   }else if(a==='remove-preset'){
    if(state.presets.length<=1){alert('最低1つのプリセットは必要です。');return}
    if(!confirm('プリセットを削除しますか？週間割当や月間例外の参照も削除します。'))return;
-   if(state.operationRules){const r=state.operationRules;for(const k of ['normalId','holidayId','maintenanceId'])if(r[k]===d.pid)r[k]='';r.extraExceptions=(r.extraExceptions||[]).filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);for(const map of [r.weekdays||{},r.overrides||{}])for(const k of Object.keys(map))if(map[k]===d.pid)map[k]='';}state.presets=state.presets.filter(p=>p.id!==d.pid);state.weekly=state.weekly.filter(x=>x.presetId!==d.pid);state.exceptions=state.exceptions.filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);ui.selectedPreset=state.presets[0].id;
+   state.operationRules??=E.operationRules(state);if(state.operationRules){const r=state.operationRules;for(const k of ['normalId','holidayId','maintenanceId'])if(r[k]===d.pid)r[k]='';r.extraExceptions=(r.extraExceptions||[]).filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);for(const map of [r.weekdays||{},r.overrides||{}])for(const k of Object.keys(map))if(map[k]===d.pid)map[k]='';}state.presets=state.presets.filter(p=>p.id!==d.pid);state.weekly=state.weekly.filter(x=>x.presetId!==d.pid);state.exceptions=state.exceptions.filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);ui.selectedPreset=state.presets[0].id;
   }else if(a==='add-row'){const p=presetById(d.pid);p?.rows.push(E.makeRow('05'));}
   else if(a==='add-row-for-fleet'){
    const p=presetById(d.pid);if(p){const row=E.makeRow('05');row.fleetId=d.fid||'';if(row.fleetId){row.probMode='fleet';row.bonusMode='fleet'}p.rows.push(row);}
@@ -1173,7 +1174,7 @@ function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)ret
  if(type==='simple-block'||type==='simple-row'){update(()=>{const block=simpleBlocks().find(x=>x.id===d.bid),obj=type==='simple-block'?block:block?.rows.find(x=>x.id===d.rid);if(obj)obj[d.field]=t.type==='checkbox'?t.checked:d.field==='count'?Math.round(E.clamp(t.value,0,200)):d.field==='multiplier'?E.clamp(t.value,0,100000):t.value;});return;}
  if(type==='operation-extra'){update(()=>{const x=state.operationRules?.extraExceptions?.[Number(d.index)];if(x)x[d.field]=d.field==='count'?Math.round(E.clamp(t.value,0,31)):t.value;});return;}
  if(type==='operation-rule'||type==='operation-weekday'){update(()=>{const r=state.operationRules??=E.operationRules(state);if(type==='operation-weekday'){r.weekdays??={};if(t.value==='auto')delete r.weekdays[d.index];else r.weekdays[d.index]=t.value;}else r[d.field]=t.type==='checkbox'?t.checked:d.field==='maintenanceCount'?Math.round(E.clamp(t.value,0,31)):t.value|| (d.field==='reference'?r.reference:'');});return;}
- if(type==='compareA'||type==='compareB'){ui[type]=t.value;render();return}
+ if(type==='compareA'||type==='compareB'||type==='compareMode'){ui[type]=t.value;render();return}
  if(type==='schedule-away'){
   const p=presetById(d.pid),period=p?.unavailablePeriods?.[Number(d.index)];
   if(!period)return;
