@@ -1367,7 +1367,7 @@ document.addEventListener('toggle',e=>{
 window.addEventListener('resize',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu));
 window.addEventListener('scroll',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu),{passive:true});
 const oldRender=render;
-render=function(){oldRender();let summary=document.querySelector('.summary');const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
+render=function(){oldRender();const summary=document.querySelector('.summary');if(!summary)return;const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
 schedulePresets();
 render();
 })();
