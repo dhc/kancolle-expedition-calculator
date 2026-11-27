@@ -72,6 +72,27 @@
 .exp-picker-results{max-height:350px;overflow-y:auto;overscroll-behavior:contain}
 .exp-choice{display:flex;align-items:center;gap:9px;width:100%;border:0;border-bottom:1px solid #edf2f5;background:white;color:#28475d;padding:10px 12px;cursor:pointer;text-align:left;min-height:43px}
 .exp-choice:last-child{border-bottom:0}
+.exp-filter{padding:7px 9px;border-bottom:1px solid #e4edf3;background:#f8fbfd}
+.exp-filter-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:11px;color:#597285}
+.exp-filter-buttons button{font-size:11px;padding:4px 7px;border:1px solid #d3e0e8;border-radius:5px;background:#fff;color:#45687d;white-space:nowrap}
+.exp-filter-buttons button.active{background:#dcebf4;border-color:#79a9c4;color:#214e69;font-weight:750}
+.exp-custom-limit{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:11px;color:#597285}
+.exp-custom-limit input{width:90px;padding:4px 7px}
+.exp-sort-header.exp-layout{display:flex;align-items:center;gap:9px;width:100%;border-bottom:1px solid #e4edf3;padding:5px 12px;position:sticky;top:0;z-index:2;background:#f3f7fa;min-height:32px;padding-top:5px;padding-bottom:5px;cursor:default}
+.exp-sort{display:inline-flex;align-items:center;justify-content:center;gap:3px;border:0;border-radius:4px;background:transparent;color:#597285;font-size:11px;font-weight:700;padding:3px;white-space:nowrap}
+.exp-sort[aria-pressed=true]{box-shadow:inset 0 0 0 1px currentColor}
+.exp-sort-arrow{font-size:10px;opacity:.55}
+.exp-sort[aria-pressed=true] .exp-sort-arrow{opacity:1}
+.exp-sort.exp-res-fuel{color:#327344;background:#e5f2e3}
+.exp-sort.exp-res-ammo{color:#957018;background:#fbefce}
+.exp-sort.exp-res-steel{color:#536579;background:#eaf0f5}
+.exp-sort.exp-res-bauxite{color:#aa4934;background:#f9e4dd}
+.exp-sort-items{grid-column:span 3;text-align:center;font-size:11px;color:#597285}
+.exp-time{width:52px;flex-shrink:0}
+.exp-result-count{padding:5px 10px;border-top:1px solid #edf2f5;color:#718899;font-size:11px}
+.exp-sort-header .exp-option-title{overflow:visible}
+.exp-sort-header .exp-time{background:#edf4f8}
+
 .exp-choice:hover,.exp-choice:focus-visible{background:#eef7fb}
 .exp-choice:focus-visible{outline:2px solid #83bdf3;outline-offset:-2px}
 .exp-choice.selected{background:#eff7fa;font-weight:750}
@@ -84,7 +105,8 @@
  .exp-res{min-width:0;height:19px;padding:0 2px;font-size:10px}
  .exp-resources{gap:2px}
  .exp-picker-results{overflow-x:auto}
- .exp-choice{min-width:500px;width:100%}
+ .exp-choice,.exp-sort-header.exp-layout{min-width:500px;width:100%}
+ .exp-sort-header.exp-layout{gap:5px;padding:5px 8px}
  .exp-choice .exp-option-title{min-width:0}
  .exp-picker-trigger .exp-resources{display:none}
  .exp-resources{grid-template-columns:repeat(4,42px) repeat(3,16px)}
@@ -478,6 +500,57 @@ function expeditionTooltip(exp){return exp.successConditions||'編成条件デ�
 function expeditionModeButtons(){
  return ['gross','hourly'].map(mode=>`<button type="button" data-action="exp-reward-mode" data-mode="${mode}" aria-pressed="${expeditionRewardMode===mode}" class="${expeditionRewardMode===mode?'active':''}">${mode==='gross'?'総報酬':'時給'}</button>`).join('');
 }
+const EXP_FILTER_PRESETS=[['all','すべて'],['60','1h未満'],['120','2h未満'],['240','4h未満'],['480','8h未満'],['custom','指定']];
+function expeditionSortValue(exp,key,mode){
+ if(key==='minutes')return exp.minutes;
+ const base=Number(exp.rewards?.[key]||0);
+ return mode==='hourly'?base*60/exp.minutes:base;
+}
+function compareExpeditions(a,b,key,desc,mode){
+ if(key==='id')return 0;
+ return (expeditionSortValue(a,key,mode)-expeditionSortValue(b,key,mode))*(desc?-1:1);
+}
+function expeditionMatches(exp,query,limit){
+ return (exp.id+' '+exp.name).normalize('NFKC').toLowerCase().includes(query)&&exp.minutes<limit;
+}
+function expeditionFilterControls(){
+ return `<div class="exp-filter"><div class="exp-filter-buttons" role="group" aria-label="所要時間フィルター"><span>所要時間</span>${EXP_FILTER_PRESETS.map(([value,label])=>`<button type="button" data-action="exp-time-filter" data-limit="${value}" aria-pressed="${value==='all'}" class="${value==='all'?'active':''}">${label}</button>`).join('')}</div><label class="exp-custom-limit hidden"><input type="number" min="1" step="1" value="90" aria-label="所要時間の上限（分）">分未満</label></div>`;
+}
+function expeditionSortButton(key,label,cls=''){
+ return `<button type="button" class="exp-sort ${cls}" data-action="exp-sort" data-key="${key}" aria-label="${label}で並べ替え" aria-pressed="${key==='id'}"><span>${label}</span><span class="exp-sort-arrow" aria-hidden="true">${key==='id'?'↓':'↕'}</span></button>`;
+}
+function expeditionSortHeader(){
+ return `<div class="exp-sort-header exp-layout"><div class="exp-option-title">${expeditionSortButton('id','遠征名')}</div><span class="exp-option-meta"><span class="exp-resources">${RESOURCE_META.slice(0,4).map(([key,short])=>expeditionSortButton(key,short,'exp-res exp-res-'+key)).join('')}<span class="exp-sort-items">物資</span></span>${expeditionSortButton('minutes','時間','exp-time')}</span></div>`;
+}
+function refreshExpeditionList(picker){
+ const results=picker.querySelector('.exp-picker-results'), list=results.querySelector('.exp-choice-list');
+ const query=picker.querySelector('.exp-picker-search input').value.normalize('NFKC').trim().toLowerCase();
+ const filter=picker.dataset.limit||'all',custom=picker.querySelector('.exp-custom-limit input');
+ const limit=filter==='all'?Infinity:filter==='custom'?(custom.valueAsNumber>0?custom.valueAsNumber:Infinity):Number(filter);
+ const key=picker.dataset.sort||'id',desc=picker.dataset.desc==='true';
+ const choices=[...list.querySelectorAll('.exp-choice')];
+ // Use original master index as deterministic tie-breaker and default order.
+ const order=choices.sort((a,b)=>compareExpeditions(EXP_MAP.get(a.dataset.value),EXP_MAP.get(b.dataset.value),key,desc,expeditionRewardMode)||Number(a.dataset.order)-Number(b.dataset.order));
+ let shown=0;
+ for(const choice of order){
+  const exp=EXP_MAP.get(choice.dataset.value);
+  const match=expeditionMatches(exp,query,limit);
+  choice.classList.toggle('hidden',!match);
+  if(match)shown++;
+  list.append(choice);
+ }
+ picker.querySelector('.exp-picker-empty').classList.toggle('hidden',shown>0);
+ picker.querySelector('.exp-result-count').textContent=shown+' / '+choices.length+' 件表示';
+ for(const button of picker.querySelectorAll('.exp-sort')){
+  const active=button.dataset.key===key;
+  button.setAttribute('aria-pressed',String(active));
+  button.querySelector('.exp-sort-arrow').textContent=active?(key==='id'||desc?'↓':'↑'):'↕';
+ }
+ for(const button of picker.querySelectorAll('[data-action="exp-time-filter"]')){
+  const active=button.dataset.limit===filter;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
+ }
+ picker.querySelector('.exp-custom-limit').classList.toggle('hidden',filter!=='custom');
+}
 function expeditionChoiceLabel(exp){
  return `${exp.id} · ${exp.name}、所要 ${expeditionDuration(exp.minutes)}、${expeditionRewardMode==='hourly'?'時給':'獲得資源'} ${expeditionRewardLabel(exp)}`;
 }
@@ -497,11 +570,12 @@ function changeExpeditionRewardMode(mode){
   const trigger=picker.querySelector('.exp-picker-trigger');
   const exp=EXP_MAP.get(trigger?.dataset.expId);
   if(exp){const badges=trigger.querySelector('.exp-resources');if(badges)badges.innerHTML=expeditionBadges(exp);}
+  refreshExpeditionList(picker);
  }
 }
 function expeditionOption(exp,chosen,attrs){
  const label=`${exp.id} · ${exp.name}`;
- return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" title="${esc(expeditionTooltip(exp))}" data-value="${esc(exp.id)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(expeditionChoiceLabel(exp))}" ${chosen?'aria-current="true"':''}>
+ return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" title="${esc(expeditionTooltip(exp))}" data-value="${esc(exp.id)}" data-order="${EXP.indexOf(exp)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(expeditionChoiceLabel(exp))}" ${chosen?'aria-current="true"':''}>
  <span class="exp-option-title">${esc(label)}</span><span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>
  </button>`;
 }
@@ -512,8 +586,9 @@ function expeditionPicker(selected,monthly,attrs){
  return `<div class="field exp-field"><label>遠征</label><details class="exp-picker">
   <summary class="exp-picker-trigger" data-exp-id="${esc(exp?.id||'')}" aria-label="遠征の選択：${esc(title)}"><span class="exp-option-title">${esc(title)}</span><span class="exp-caret" aria-hidden="true">▾</span>${exp?`<span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>`:''}</summary>
   <div class="exp-picker-menu"><div class="exp-picker-search"><input type="search" placeholder="遠征番号・名前で検索" aria-label="遠征を検索" autocomplete="off"><div class="exp-mode-switch" role="group" aria-label="報酬表示">${expeditionModeButtons()}</div></div>
-  <div class="exp-picker-results">${pool.map(x=>expeditionOption(x,x.id===selected,attrs)).join('')}</div>
-  <div class="exp-picker-empty hidden">一致する遠征がありません</div></div></details></div>`;
+   ${expeditionFilterControls()}
+  <div class="exp-picker-results">${expeditionSortHeader()}<div class="exp-choice-list">${pool.map(x=>expeditionOption(x,x.id===selected,attrs)).join('')}</div></div>
+  <div class="exp-picker-empty hidden">一致する遠征がありません</div><div class="exp-result-count" aria-live="polite">${pool.length} / ${pool.length} 件表示</div></div></details></div>`;
 }
 function fleetOptions(selected){return options([{value:'',label:'編成なし'},...state.fleets.map(f=>({value:f.id,label:f.name}))],selected)}
 function numberField(label,value,attrs='',cls='narrow'){return `<div class="field ${cls}"><label>${esc(label)}</label><input type="number" value="${esc(value)}" ${attrs}></div>`}
@@ -822,6 +897,15 @@ function handleClick(e){
  if(e.target.closest('.map-monthly-summary')){ui.monthlyMappingOpen=!ui.monthlyMappingOpen;return;}
  const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action,d=b.dataset;
  if(a==='exp-reward-mode'){changeExpeditionRewardMode(d.mode);return;}
+ if(a==='exp-sort'){
+  const picker=b.closest('.exp-picker'),same=(picker.dataset.sort||'id')===d.key;
+  picker.dataset.desc=String(d.key==='id'?false:same?picker.dataset.desc!=='true':d.key!=='minutes');
+  picker.dataset.sort=d.key;refreshExpeditionList(picker);picker.querySelector('.exp-picker-results').scrollTop=0;return;
+ }
+ if(a==='exp-time-filter'){
+  const picker=b.closest('.exp-picker');picker.dataset.limit=d.limit;refreshExpeditionList(picker);picker.querySelector('.exp-picker-results').scrollTop=0;
+  if(d.limit==='custom')picker.querySelector('.exp-custom-limit input').focus();return;
+ }
  if(a==='select-exp'){
   if(d.sid){const p=presetById(d.pid);if(p&&!scheduleEditExp(p,d.sid,d.value))return;update(()=>{});return;}
   update(()=>{const {row}=findRow(b);if(row)row.expId=d.value;});
@@ -949,18 +1033,10 @@ function parseDeck(raw){
  }
  return result;
 }
-// Filter the currently opened expedition menu without re-rendering the application.
+// Combine text and duration filters without re-rendering the application.
 document.addEventListener('input',e=>{
- if(!e.target.matches('.exp-picker-search input'))return;
- const picker=e.target.closest('.exp-picker');
- const query=e.target.value.normalize('NFKC').trim().toLowerCase();
- let shown=0;
- for(const choice of picker.querySelectorAll('.exp-choice')){
-  const matched=choice.dataset.search.normalize('NFKC').includes(query);
-  choice.classList.toggle('hidden',!matched);
-  if(matched)shown++;
- }
- picker.querySelector('.exp-picker-empty')?.classList.toggle('hidden',shown>0);
+ if(!e.target.matches('.exp-picker-search input,.exp-custom-limit input'))return;
+ const picker=e.target.closest('.exp-picker');refreshExpeditionList(picker);picker.querySelector('.exp-picker-results').scrollTop=0;
 });
 document.addEventListener('keydown',e=>{
  const picker=e.target.closest('.exp-picker[open]');if(!picker)return;
