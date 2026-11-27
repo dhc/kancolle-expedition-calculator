@@ -56,13 +56,18 @@
 .exp-res-bucket{color:#28794c;background:#e7f5eb}
 .exp-res-dev{color:#75603b;background:#f8f1e3}
 .exp-res-screw{color:#775295;background:#f2eaf8}
-.exp-resources{display:grid;grid-template-columns:repeat(4,39px) repeat(3,19px);gap:3px}
+.exp-resources{display:grid;grid-template-columns:repeat(4,46px) repeat(3,19px);gap:3px}
 .exp-res.exp-zero{color:#cbd1d5;background:#f7f8f9;font-weight:400}
 .exp-item-empty{visibility:hidden}
 .exp-caret{font-size:12px;color:#678498;transition:transform .15s}
 .exp-picker[open] .exp-caret{transform:rotate(180deg)}
 .exp-picker-menu{position:absolute;top:calc(100% + 5px);left:0;width:min(690px,calc(100vw - 52px));background:#fff;border:1px solid #cbdfe9;border-radius:11px;box-shadow:0 14px 38px rgba(15,49,73,.22);z-index:50;overflow:hidden}
-.exp-picker-search{padding:9px;border-bottom:1px solid #e4edf3;background:#f8fbfd}
+.exp-picker-search{padding:9px;border-bottom:1px solid #e4edf3;background:#f8fbfd;display:flex;align-items:center;gap:8px}
+.exp-picker-search input{flex:1;min-width:0}
+.exp-mode-switch{display:flex;flex-shrink:0;gap:2px;padding:2px;border-radius:7px;background:#e5edf3;white-space:nowrap}
+.exp-mode-switch button{border:0;background:transparent;color:#597285;font-size:11px;font-weight:700;padding:6px 9px;border-radius:5px}
+.exp-mode-switch button.active{background:#fff;color:#24425a;box-shadow:0 1px 3px #c4d4df}
+@media(max-width:380px){.exp-picker-search{gap:4px}.exp-mode-switch button{padding:6px 5px}}
 .exp-picker-search input{width:100%;background:white;border:1px solid #d3e0e8;border-radius:7px;padding:9px}
 .exp-picker-results{max-height:350px;overflow-y:auto;overscroll-behavior:contain}
 .exp-choice{display:flex;align-items:center;gap:9px;width:100%;border:0;border-bottom:1px solid #edf2f5;background:white;color:#28475d;padding:10px 12px;cursor:pointer;text-align:left;min-height:43px}
@@ -82,7 +87,7 @@
  .exp-choice{min-width:500px;width:100%}
  .exp-choice .exp-option-title{min-width:0}
  .exp-picker-trigger .exp-resources{display:none}
- .exp-resources{grid-template-columns:repeat(4,34px) repeat(3,16px)}
+ .exp-resources{grid-template-columns:repeat(4,42px) repeat(3,16px)}
  .exp-choice{gap:5px;padding:10px 8px}
  .exp-time{padding:3px 4px}
 }
@@ -454,27 +459,49 @@ function fleetById(id){return state.fleets.find(x=>String(x.id)===String(id))}
 function options(rows,selected){return rows.map(r=>`<option value="${esc(r.value)}" ${String(r.value)===String(selected)?'selected':''}>${esc(r.label)}</option>`).join('')}
 // Expedition picker: named choices with duration and colored base resource indicators.
 // Using a custom disclosure instead of native <option>, whose rich styling is browser-dependent.
+const EXP_REWARD_MODE_KEY='kc-expedition-picker-reward-mode';
+let expeditionRewardMode=readStorage(EXP_REWARD_MODE_KEY,LS)==='hourly'?'hourly':'gross';
 const RESOURCE_META=[['fuel','油','燃料'],['ammo','弾','弾薬'],['steel','鋼','鋼材'],['bauxite','ボ','ボーキサイト'],['bucket','バ','高速修復材'],['dev','釘','開発資材'],['screw','ネ','改修資材']];
 function expeditionDuration(minutes){const h=Math.floor(minutes/60),m=minutes%60;return `${h}:${String(m).padStart(2,'0')}`;}
 function expeditionRewardEntries(exp){
  return RESOURCE_META.map(([key,short,name],i)=>{
   const base=Number(exp.rewards?.[key]||0);
   const present=i<4||Number(exp.itemRewards?.[key]?.max||0)>0;
-  return {key,short,name,value:i<4?String(base):short,present,zero:i<4&&base===0,resource:i<4};
+  return {key,short,name,value:i<4?(expeditionRewardMode==='hourly'?fmt(base*60/exp.minutes,1):String(base)):short,present,zero:i<4&&base===0,resource:i<4};
  });
 }
 function expeditionBadges(exp){
  return expeditionRewardEntries(exp).map(({key,name,value,present,zero,resource})=>present?`<span class="exp-res exp-res-${key}${zero?' exp-zero':''}${resource?' exp-base':''}" aria-label="${esc(name+(resource?' '+value:''))}">${esc(value)}</span>`:`<span class="exp-res exp-item-empty" aria-hidden="true"></span>`).join('');
 }
 function expeditionRewardLabel(exp){return expeditionRewardEntries(exp).filter(x=>x.present).map(x=>x.name+(x.resource?' '+x.value:'')).join('、');}
-function expeditionTooltip(exp){
- const conditions=exp.successConditions||'編成条件データ未登録';
- const hourly=RESOURCE_META.slice(0,4).map(([key,short])=>short+fmt(Number(exp.rewards?.[key]||0)*60/exp.minutes,1)).join(' ');
- return conditions+'\n時給：'+hourly;
+function expeditionTooltip(exp){return exp.successConditions||'編成条件データ未登録';}
+function expeditionModeButtons(){
+ return ['gross','hourly'].map(mode=>`<button type="button" data-action="exp-reward-mode" data-mode="${mode}" aria-pressed="${expeditionRewardMode===mode}" class="${expeditionRewardMode===mode?'active':''}">${mode==='gross'?'総報酬':'時給'}</button>`).join('');
+}
+function expeditionChoiceLabel(exp){
+ return `${exp.id} · ${exp.name}、所要 ${expeditionDuration(exp.minutes)}、${expeditionRewardMode==='hourly'?'時給':'獲得資源'} ${expeditionRewardLabel(exp)}`;
+}
+function changeExpeditionRewardMode(mode){
+ if(!['gross','hourly'].includes(mode)||mode===expeditionRewardMode)return;
+ expeditionRewardMode=mode;setStorage(EXP_REWARD_MODE_KEY,mode,LS);
+ // Update in place so the open menu, search, scroll and focus are preserved.
+ for(const picker of document.querySelectorAll('.exp-picker')){
+  for(const button of picker.querySelectorAll('[data-action="exp-reward-mode"]')){
+   const active=button.dataset.mode===mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
+  }
+  for(const choice of picker.querySelectorAll('.exp-choice')){
+   const exp=EXP_MAP.get(choice.dataset.value);if(!exp)continue;
+   choice.querySelector('.exp-resources').innerHTML=expeditionBadges(exp);
+   choice.setAttribute('aria-label',expeditionChoiceLabel(exp));
+  }
+  const trigger=picker.querySelector('.exp-picker-trigger');
+  const exp=EXP_MAP.get(trigger?.dataset.expId);
+  if(exp){const badges=trigger.querySelector('.exp-resources');if(badges)badges.innerHTML=expeditionBadges(exp);}
+ }
 }
 function expeditionOption(exp,chosen,attrs){
  const label=`${exp.id} · ${exp.name}`;
- return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" title="${esc(expeditionTooltip(exp))}" data-value="${esc(exp.id)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(label)}、所要 ${expeditionDuration(exp.minutes)}、獲得資源 ${esc(expeditionRewardLabel(exp))}" ${chosen?'aria-current="true"':''}>
+ return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" title="${esc(expeditionTooltip(exp))}" data-value="${esc(exp.id)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(expeditionChoiceLabel(exp))}" ${chosen?'aria-current="true"':''}>
  <span class="exp-option-title">${esc(label)}</span><span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>
  </button>`;
 }
@@ -483,8 +510,8 @@ function expeditionPicker(selected,monthly,attrs){
  const pool=EXP.filter(x=>x.monthly===!!monthly);
  const title=exp?`${exp.id} · ${exp.name}`:'遠征を選択';
  return `<div class="field exp-field"><label>遠征</label><details class="exp-picker">
-  <summary class="exp-picker-trigger" aria-label="遠征の選択：${esc(title)}"><span class="exp-option-title">${esc(title)}</span><span class="exp-caret" aria-hidden="true">▾</span>${exp?`<span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>`:''}</summary>
-  <div class="exp-picker-menu"><div class="exp-picker-search"><input type="search" placeholder="遠征番号・名前で検索" aria-label="遠征を検索" autocomplete="off"></div>
+  <summary class="exp-picker-trigger" data-exp-id="${esc(exp?.id||'')}" aria-label="遠征の選択：${esc(title)}"><span class="exp-option-title">${esc(title)}</span><span class="exp-caret" aria-hidden="true">▾</span>${exp?`<span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>`:''}</summary>
+  <div class="exp-picker-menu"><div class="exp-picker-search"><input type="search" placeholder="遠征番号・名前で検索" aria-label="遠征を検索" autocomplete="off"><div class="exp-mode-switch" role="group" aria-label="報酬表示">${expeditionModeButtons()}</div></div>
   <div class="exp-picker-results">${pool.map(x=>expeditionOption(x,x.id===selected,attrs)).join('')}</div>
   <div class="exp-picker-empty hidden">一致する遠征がありません</div></div></details></div>`;
 }
@@ -794,6 +821,7 @@ function handleClick(e){
  }
  if(e.target.closest('.map-monthly-summary')){ui.monthlyMappingOpen=!ui.monthlyMappingOpen;return;}
  const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action,d=b.dataset;
+ if(a==='exp-reward-mode'){changeExpeditionRewardMode(d.mode);return;}
  if(a==='select-exp'){
   if(d.sid){const p=presetById(d.pid);if(p&&!scheduleEditExp(p,d.sid,d.value))return;update(()=>{});return;}
   update(()=>{const {row}=findRow(b);if(row)row.expId=d.value;});
