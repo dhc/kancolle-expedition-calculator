@@ -57,7 +57,7 @@
 .exp-res-dev{color:#75603b;background:#f8f1e3}
 .exp-res-screw{color:#775295;background:#f2eaf8}
 .exp-resources{display:grid;grid-template-columns:repeat(4,39px) repeat(3,19px);gap:3px}
-.exp-res.exp-zero{color:#8a9690;font-weight:400}
+.exp-res.exp-zero{color:#cbd1d5;background:#f7f8f9;font-weight:400}
 .exp-item-empty{visibility:hidden}
 .exp-hover-tip{position:fixed;z-index:10000;pointer-events:none;background:#20394c;color:#fff;padding:12px;border-radius:9px;box-shadow:0 8px 25px #0004;width:300px;max-width:calc(100vw - 16px);font-size:12px;line-height:1.6}
 .exp-tip-head{border-top:1px solid #536879;margin-top:8px;padding-top:7px;color:#c0d5e1;font-size:11px}
@@ -962,9 +962,6 @@ const oldRender=render;
 render=function(){oldRender();let summary=document.querySelector('.summary');const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
 schedulePresets();
 render();
-})();
-
-
 let expeditionHoverTip=null;
 function hideExpeditionTip(){expeditionHoverTip?.remove();expeditionHoverTip=null;}
 function showExpeditionTip(choice){
@@ -976,7 +973,7 @@ function showExpeditionTip(choice){
  tip.style.left=x+'px';tip.style.top=y+'px';
 }
 document.addEventListener('pointerover',e=>{
- if(e.pointerType!=='mouse')return;
+ if(e.pointerType&&e.pointerType!=='mouse')return;
  const choice=e.target.closest('.exp-choice');if(choice&&!choice.contains(e.relatedTarget))showExpeditionTip(choice);
 });
 document.addEventListener('pointerout',e=>{
@@ -985,7 +982,9 @@ document.addEventListener('pointerout',e=>{
 document.addEventListener('click',hideExpeditionTip,true);
 document.addEventListener('scroll',hideExpeditionTip,true);
 document.addEventListener('keydown',hideExpeditionTip);
+document.addEventListener('toggle',e=>{if(e.target.matches?.('.exp-picker')&&!e.target.open)hideExpeditionTip();},true);
 window.addEventListener('resize',hideExpeditionTip);
+})();
 </script>
 </body>
 </html>
