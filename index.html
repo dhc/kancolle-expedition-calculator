@@ -122,6 +122,22 @@
 .timeline-track{position:relative;height:40px;border:1px solid #d5e2eb;border-radius:7px;background:repeating-linear-gradient(90deg,transparent 0%,transparent calc(16.6667% - 1px),#dae5ec calc(16.6667% - 1px),#dae5ec 16.6667%),#f1f6fa;overflow:hidden}
 .timeline-bar{position:absolute;top:5px;bottom:5px;background:#327aa3;border:1px solid #1f5f85;border-radius:5px;display:flex;align-items:center;padding:0 4px;color:white;font-size:10px;white-space:nowrap;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.1)}
 .timeline-bar span{overflow:hidden;text-overflow:ellipsis}
+.timeline-bar,.timeline-strip{cursor:grab;touch-action:none;user-select:none}
+.timeline-bar:active,.timeline-strip:active{cursor:grabbing}
+.timeline-bar.timeline-conflict{background:#b94c41;border-color:#92372f}
+.timeline-unassigned{display:flex;gap:7px;flex-wrap:wrap;align-items:center;min-height:54px;padding:9px;border:1px dashed #a8becc;border-radius:8px;background:#f8fbfd;margin:8px 0}
+.timeline-strip{display:inline-flex;align-items:center;border:1px solid #1f5f85;background:#327aa3;color:#fff;border-radius:5px;padding:7px 10px;font-size:11px;max-width:100%}
+.timeline-strip.timeline-conflict{background:#b94c41;border-color:#92372f}
+.timeline-drop-active{outline:2px solid #4b9cc1;outline-offset:2px}
+.timeline-drag-ghost{position:fixed;z-index:10000;pointer-events:none;background:#327aa3;color:#fff;padding:7px 10px;border-radius:5px;box-shadow:0 3px 10px #0003;font-size:12px;white-space:nowrap}
+.timeline-dragging{opacity:.45}
+.exp-picker-trigger .exp-option-meta{gap:4px}
+.exp-picker-trigger .exp-resources{display:none}
+.exp-picker-menu.exp-open-up{top:auto;bottom:calc(100% + 5px)}
+.exp-picker-menu.exp-positioned{position:fixed;top:var(--exp-top);left:var(--exp-left);bottom:auto;width:var(--exp-width);max-height:var(--exp-height);display:flex;flex-direction:column}
+.exp-picker-menu.exp-positioned .exp-picker-results{min-height:0;flex:1 1 auto}
+.exp-picker-menu.exp-positioned .exp-picker-search,.exp-picker-menu.exp-positioned .exp-filter,.exp-picker-menu.exp-positioned .exp-result-count{flex-shrink:0}
+
 .schedule-entry{border:1px solid #e1eaf0;border-radius:10px;padding:10px 12px;margin-top:10px;background:#fbfdff}
 .schedule-entry-fields{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
 .schedule-entry-fields .field.exp-field{flex:2 1 280px;min-width:200px}
@@ -700,6 +716,22 @@ function splitScheduleRow(p,entry){
  row.count-=1;
  const next={...structuredClone(row),id:uid(),count:1};p.rows.push(next);entry.rowId=next.id;
 }
+function timelineAssigned(s){return ['2','3','4'].includes(String(s.slot))&&s.start!==null&&s.start!==undefined&&s.start!=='';}
+function timelineOverlap(s,runs){return timelineAssigned(s)&&runs.some(t=>t.id!==s.id&&timelineAssigned(t)&&String(t.slot)===String(s.slot)&&E.scheduleConflicts(s,[t],0).hard.some(x=>x.includes('時間が重複')));}
+function moveScheduleDeparture(p,sid,slot,relative){
+ const entry=p.schedule?.find(x=>x.id===sid);if(!entry)return false;
+ if(slot===''){entry.slot='';entry.start=null;entry.dayOffset=0;return true;}
+ if(!['2','3','4'].includes(String(slot))||!Number.isFinite(relative))return false;
+ entry.slot=String(slot);entry.start=(E.dayStartMinutes(p)+Math.max(0,Math.min(1435,Math.round(relative/5)*5)))%1440;entry.dayOffset=0;return true;
+}
+function sortScheduleDepartures(p){
+ const runs=new Map(scheduleRows(p).map(x=>[x.id,x])),base=E.dayStartMinutes(p);
+ p.schedule.sort((a,b)=>{
+  const x=runs.get(a.id),y=runs.get(b.id);if(!x||!y)return 0;
+  const rank=z=>timelineAssigned(z)?Number(z.slot):5;
+  return rank(x)-rank(y)||(timelineAssigned(x)&&timelineAssigned(y)?E.dayRelativeMinute(x.start,base)+(Number(x.dayOffset)||0)*1440-E.dayRelativeMinute(y.start,base)-(Number(y.dayOffset)||0)*1440:0);
+ });
+}
 function renderSchedulerTimeline(audit,preset){
  const base=audit.dayStart;
  const hours=[0,4,8,12,16,20,24];
@@ -716,15 +748,20 @@ function renderSchedulerTimeline(audit,preset){
    const startText=E.clockString(absoluteStart);
    const endText=E.clockString(absoluteStart+s.duration);
    const title=`${s.exp.name}  ${startText}〜${endText}  ${s.row.fleetId?(fleetById(s.row.fleetId)?.name||'編成不明'):'編成なし'}`;
-   if(relativeEnd>relativeStart)result+=`<div class="timeline-bar" style="left:${relativeStart/14.4}%;width:${(relativeEnd-relativeStart)/14.4}%" title="${esc(title)}"><span>${esc(s.exp.name)}</span></div>`;
+   if(relativeEnd>relativeStart)result+=`<div class="timeline-bar ${timelineOverlap(s,audit.runs)?'timeline-conflict':''}" data-drag-sid="${esc(s.id)}" data-pid="${esc(preset.id)}" data-relative="${relativeStart}" title="${esc(title)}" style="left:${relativeStart/14.4}%;width:${(relativeEnd-relativeStart)/14.4}%"><span>${esc(s.exp.name)}</span></div>`;
   }
   return result;
  };
  const startLabel=E.clockString(base),endLabel=E.clockString(base+1440);
+ const unassigned=audit.runs.filter(s=>!timelineAssigned(s));
+ const overflow=audit.runs.filter(s=>timelineAssigned(s)&&Math.max(0,Number(s.dayOffset)||0)>0);
+ const strip=s=>`<div class="timeline-strip ${timelineOverlap(s,audit.runs)?'timeline-conflict':''}" data-drag-sid="${esc(s.id)}" data-pid="${esc(preset.id)}" title="${esc(s.exp.name)}">${esc(s.exp.name)}${overflow.includes(s)?'（翌運用日）':''}</div>`;
  return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊枠の占有状況</h2><p>1日の範囲：${esc(startLabel)} 〜 ${esc(endLabel)}。左端が基準時刻、右端が翌日の基準時刻です。</p></div></div>
  <div class="timeline-head"><span></span><div class="timeline-hours">${hours.map(x=>{const t=E.clockString(base+x*60);return `<span title="${esc(t)}">${esc(t.slice(0,5))}</span>`}).join('')}</div></div>
- ${[2,3,4].map(slot=>`<div class="timeline-row"><div class="timeline-label">第${slot}艦隊</div><div class="timeline-track">${bars(slot)}</div></div>`).join('')}
- <p class="note">斜線部分は「触れない時間帯」です。遠征複製では、帰投がこの時間帯に重なれば終了時刻まで出発を繰り下げます。艦隊枠の重複や翌日の基準時刻越えは警告しますが、登録・編集は可能です。タイムラインは基準時刻から24時間分を表示します。</p></section>`;
+ ${[2,3,4].map(slot=>`<div class="timeline-row"><div class="timeline-label">第${slot}艦隊</div><div class="timeline-track" data-drop-slot="${slot}" data-pid="${esc(preset.id)}">${bars(slot)}</div></div>`).join('')}
+ <h3 style="margin-top:15px">未割当の遠征</h3><div class="timeline-unassigned" data-drop-slot="" data-pid="${esc(preset.id)}">${unassigned.length?unassigned.map(strip).join(''):'<span class="note">ここへドラッグすると割当を解除します。</span>'}</div>
+ ${overflow.length?`<h3>表示範囲外の遠征</h3><div class="timeline-unassigned">${overflow.map(strip).join('')}</div>`:''}
+ <p class="note">遠征バーをドラッグして艦隊・出発時刻を変更できます（5分刻み）。未割当に戻しても遠征回数は維持します。赤色は同一艦隊内の時間重複です。斜線は触れない時間帯です。重複・基準時刻越えは警告のみで登録可能です。</p></section>`;
 }
 function renderScheduleEntry(p,s){
  const exp=s.exp,row=s.row;
@@ -755,7 +792,7 @@ function renderScheduler(){
  const unavailableUI=`<section class="schedule-unavailable"><div class="row-between"><div><h3>触れない時間帯</h3><p class="note">出発予定の「遠征複製」時に、帰投がこの時間帯なら終了後に出発を繰り下げます。</p></div>${button('schedule-away-add','＋ 時間帯を追加','btn tiny',`data-pid="${esc(p.id)}"`)}</div>
  ${unavailable.length?unavailable.map((period,i)=>`<div class="schedule-away-row"><div class="field schedule-clock"><label>開始（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.start)}" data-change="schedule-away" data-field="start" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 開始"></div><span class="away-separator">〜</span><div class="field schedule-clock"><label>終了（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.end)}" data-change="schedule-away" data-field="end" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 終了"></div>${button('schedule-away-remove','削除','btn tiny danger',`data-pid="${esc(p.id)}" data-index="${i}"`)}</div>`).join(''):'<p class="note">未登録：従来どおり帰投直後に複製します。</p>'}
  <p class="note">例：0900〜1800、2300〜0700。日付をまたぐ設定も可能です。登録済みの出発予定は自動変更しません。</p></section>`;
- const top=`<section class="panel section"><div class="sectionhead"><div><h2>遠征スケジューラー</h2><p>遠征の回数を、実際の出発時刻と第2〜第4艦隊の枠へ割り当てます。</p></div></div>
+ const top=`<section class="panel section"><div class="sectionhead"><div><h2>遠征スケジューラー</h2><p>遠征の回数を、実際の出発時刻と第2〜第4艦隊の枠へ割り当てます。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
  <div class="preset-list">${state.presets.map(x=>`<button type="button" class="preset-tab ${x.id===p.id?'selected':''}" data-action="choose-preset" data-pid="${esc(x.id)}">${esc(x.name)}<span>${x.rows.reduce((n,r)=>n+E.clamp(r.count,0,200),0)}回 / 日</span></button>`).join('')}</div>
  <div class="schedule-day-start"><div class="field schedule-clock"><label>1日の基準時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="0700" value="${E.clockDigits(dayStart)}" data-change="schedule-base" data-pid="${esc(p.id)}" aria-label="1日の基準時刻（4桁）"></div><div class="note">このプリセットの1日：<strong>${E.clockString(dayStart)} 〜 ${E.clockString(dayStart+1440)}</strong>。超過する予定も登録できますが、警告を表示します。</div></div>
  ${unavailableUI}
@@ -765,7 +802,7 @@ function renderScheduler(){
  </section>`;
  if(!p.scheduleEnabled)return `<div class="stack">${top}</div>`;
  const audit=E.scheduleAudit(p,EXP);
- const status=`<section class="panel section"><div class="row-between"><div><h2>出発予定</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><span class="chip ${audit.complete?'green':'amber'}">${audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div>
+ const status=`<section class="panel section"><div class="row-between"><div><h2>出発予定</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><div class="row-wrap">${button('schedule-sort','艦隊・時刻順','btn',`data-pid="${esc(p.id)}"`)}<span class="chip ${audit.complete?'green':'amber'}">${audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div></div>
  <div class="sumstrip"><span><strong>1日分の獲得期待値：</strong>${['fuel','ammo','steel','bauxite'].map((k,i)=>`${['燃','弾','鋼','ボ'][i]} ${fmt(period.earned[k])}`).join(' ／ ')}</span><span class="muted">${E.formatOccupation(period.occupation.totalMinutes)} / 延べ</span></div>
  <p class="note">この金額は予定が未配置でもプリセット内の全遠征を集計した値です。編成未登録時は補給費を差し引いていません。</p>
  ${audit.hard.map(x=>`<div class="warning">要確認（登録済み）：${esc(x)}</div>`).join('')}
@@ -928,6 +965,7 @@ function handleClick(e){
  if(a==='delete-snapshot'){snaps=snaps.filter(s=>s.id!==d.sid);setStorage(SNAP,snaps,SS);render();return}
  if(a==='reset-all'){if(confirm('現在の設定を初期化しますか？（元に戻せません）'))update(()=>{state=blankState();ui.selectedPreset='p1';ui.selectedFleet='';ui.expandedRow='';});return}
  if(a==='load-sample'){if(confirm('サンプル運用で現在の設定を上書きしますか？'))update(()=>{state=E.sample();ui.selectedPreset='p1';ui.selectedFleet='';ui.expandedRow='';ui.tab='plan';});return}
+ if(a==='schedule-sort'){update(()=>{const p=presetById(d.pid);if(p)sortScheduleDepartures(p);});return;}
  if(a==='schedule-enable'){update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=true;p.schedule=[];}});return}
  if(a==='schedule-disable'){if(!confirm('このプリセットの時刻と艦隊枠の割当を解除しますか？　遠征と回数は残ります。'))return;update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=false;p.schedule=[];}});return}
  if(a==='schedule-add'){update(()=>{const p=presetById(d.pid);if(!p)return;p.rows.push(E.makeRow('05'));});return}
@@ -1057,6 +1095,60 @@ document.addEventListener('change',async e=>{
  }
 });
 // Global common great probability control is inserted into overview by footer bar after first render.
+// Pointer-based drag: one shared schedule entry is moved, not copied.
+let timelineDrag=null;
+function clearTimelineDrag(){
+ if(!timelineDrag)return;
+ timelineDrag.ghost?.remove();timelineDrag.el.classList.remove('timeline-dragging');
+ document.querySelectorAll('.timeline-drop-active').forEach(x=>x.classList.remove('timeline-drop-active'));
+ timelineDrag=null;
+}
+document.addEventListener('pointerdown',e=>{
+ const el=e.target.closest('[data-drag-sid]');if(!el||e.button!==0||timelineDrag)return;
+ const track=el.closest('.timeline-track'),rect=track?.getBoundingClientRect();
+ const offset=rect?(e.clientX-rect.left)*1440/rect.width-Number(el.dataset.relative):0;
+ timelineDrag={el,id:el.dataset.dragSid,pid:el.dataset.pid,offset,pointer:e.pointerId,x:e.clientX,y:e.clientY,ghost:null};
+ el.setPointerCapture(e.pointerId);e.preventDefault();
+});
+function timelineTarget(x,y){
+ return [...document.querySelectorAll('[data-drop-slot]')].find(t=>{
+  const r=t.getBoundingClientRect();return t.dataset.pid===timelineDrag.pid&&x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom;
+ });
+}
+document.addEventListener('pointermove',e=>{
+ const d=timelineDrag;if(!d||d.pointer!==e.pointerId)return;
+ if(!d.ghost&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<4)return;
+ if(!d.ghost){d.ghost=document.createElement('div');d.ghost.className='timeline-drag-ghost';d.ghost.textContent=d.el.textContent;document.body.append(d.ghost);d.el.classList.add('timeline-dragging');}
+ d.ghost.style.left=Math.min(innerWidth-100,e.clientX+12)+'px';d.ghost.style.top=Math.min(innerHeight-30,e.clientY+12)+'px';
+ const target=timelineTarget(e.clientX,e.clientY);
+ document.querySelectorAll('[data-drop-slot]').forEach(t=>t.classList.toggle('timeline-drop-active',t===target));
+});
+document.addEventListener('pointerup',e=>{
+ const d=timelineDrag;if(!d||d.pointer!==e.pointerId)return;
+ const target=d.ghost?timelineTarget(e.clientX,e.clientY):null;
+ const slot=target?.dataset.dropSlot,r=target?.getBoundingClientRect();
+ const relative=r?(e.clientX-r.left)*1440/r.width-d.offset:0;
+ clearTimelineDrag();
+ if(target){const p=presetById(d.pid);if(p&&moveScheduleDeparture(p,d.id,slot,relative))update(()=>{});}
+});
+document.addEventListener('pointercancel',clearTimelineDrag);
+document.addEventListener('lostpointercapture',clearTimelineDrag);
+function positionExpeditionMenu(picker){
+ if(!picker?.open)return;
+ const menu=picker.querySelector('.exp-picker-menu'),trigger=picker.querySelector('summary'),results=menu.querySelector('.exp-picker-results');
+ const r=trigger.getBoundingClientRect(),w=Math.min(690,innerWidth-16),left=Math.max(8,Math.min(r.left,innerWidth-w-8));
+ const below=innerHeight-r.bottom-12,above=r.top-12;
+ const up=below<Math.min(490,menu.scrollHeight)&&above>below;
+ const available=Math.max(80,up?above:below);
+ menu.classList.add('exp-positioned');menu.style.setProperty('--exp-width',w+'px');menu.style.setProperty('--exp-left',left+'px');menu.style.setProperty('--exp-height',available+'px');
+ menu.style.setProperty('--exp-top',(up?Math.max(8,r.top-5-Math.min(menu.scrollHeight,available)):r.bottom+5)+'px');
+}
+document.addEventListener('toggle',e=>{
+ const picker=e.target;if(!picker.matches?.('.exp-picker'))return;
+ if(picker.open)positionExpeditionMenu(picker);else picker.querySelector('.exp-picker-menu').classList.remove('exp-positioned');
+},true);
+window.addEventListener('resize',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu));
+window.addEventListener('scroll',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu),{passive:true});
 const oldRender=render;
 render=function(){oldRender();let summary=document.querySelector('.summary');const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
 schedulePresets();
