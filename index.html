@@ -59,11 +59,6 @@
 .exp-resources{display:grid;grid-template-columns:repeat(4,39px) repeat(3,19px);gap:3px}
 .exp-res.exp-zero{color:#cbd1d5;background:#f7f8f9;font-weight:400}
 .exp-item-empty{visibility:hidden}
-.exp-hover-tip{position:fixed;z-index:10000;pointer-events:none;background:#20394c;color:#fff;padding:12px;border-radius:9px;box-shadow:0 8px 25px #0004;width:300px;max-width:calc(100vw - 16px);font-size:12px;line-height:1.6}
-.exp-tip-head{border-top:1px solid #536879;margin-top:8px;padding-top:7px;color:#c0d5e1;font-size:11px}
-.exp-hour-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin-top:5px}
-.exp-hour{border-radius:5px;padding:4px;text-align:center;font-size:10px}
-.exp-hour strong{display:block;font-size:14px;font-variant-numeric:tabular-nums}
 .exp-caret{font-size:12px;color:#678498;transition:transform .15s}
 .exp-picker[open] .exp-caret{transform:rotate(180deg)}
 .exp-picker-menu{position:absolute;top:calc(100% + 5px);left:0;width:min(690px,calc(100vw - 52px));background:#fff;border:1px solid #cbdfe9;border-radius:11px;box-shadow:0 14px 38px rgba(15,49,73,.22);z-index:50;overflow:hidden}
@@ -473,13 +468,13 @@ function expeditionBadges(exp){
 }
 function expeditionRewardLabel(exp){return expeditionRewardEntries(exp).filter(x=>x.present).map(x=>x.name+(x.resource?' '+x.value:'')).join('、');}
 function expeditionTooltip(exp){
- const conditions=exp.successConditions||null;
- const hourly=RESOURCE_META.slice(0,4).map(([key,short,name])=>`<span class="exp-hour exp-res-${key}">${name}<strong>${fmt(Number(exp.rewards?.[key]||0)*60/exp.minutes,1)}</strong></span>`).join('');
- return `<strong>${esc(exp.id+' '+exp.name)}</strong><div class="exp-tip-head">遠征成功条件</div><div>${conditions?esc(conditions):'編成条件データ未登録'}</div><div class="exp-tip-head">基本獲得量／時間（補正・補給費なし）</div><div class="exp-hour-grid">${hourly}</div>`;
+ const conditions=exp.successConditions||'編成条件データ未登録';
+ const hourly=RESOURCE_META.slice(0,4).map(([key,short])=>short+fmt(Number(exp.rewards?.[key]||0)*60/exp.minutes,1)).join(' ');
+ return conditions+'\n時給：'+hourly;
 }
 function expeditionOption(exp,chosen,attrs){
  const label=`${exp.id} · ${exp.name}`;
- return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" data-value="${esc(exp.id)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(label)}、所要 ${expeditionDuration(exp.minutes)}、獲得資源 ${esc(expeditionRewardLabel(exp))}" ${chosen?'aria-current="true"':''}>
+ return `<button type="button" class="exp-choice ${chosen?'selected':''}" data-action="select-exp" title="${esc(expeditionTooltip(exp))}" data-value="${esc(exp.id)}" ${attrs} data-search="${esc((exp.id+' '+exp.name).toLowerCase())}" aria-label="${esc(label)}、所要 ${expeditionDuration(exp.minutes)}、獲得資源 ${esc(expeditionRewardLabel(exp))}" ${chosen?'aria-current="true"':''}>
  <span class="exp-option-title">${esc(label)}</span><span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>
  </button>`;
 }
@@ -962,28 +957,6 @@ const oldRender=render;
 render=function(){oldRender();let summary=document.querySelector('.summary');const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
 schedulePresets();
 render();
-let expeditionHoverTip=null;
-function hideExpeditionTip(){expeditionHoverTip?.remove();expeditionHoverTip=null;}
-function showExpeditionTip(choice){
- const exp=EXP_MAP.get(choice.dataset.value);if(!exp)return;
- hideExpeditionTip();
- const tip=document.createElement('div');tip.className='exp-hover-tip';tip.setAttribute('role','tooltip');tip.innerHTML=expeditionTooltip(exp);document.body.append(tip);expeditionHoverTip=tip;
- const r=choice.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;
- const x=Math.max(8,Math.min(innerWidth-w-8,r.right-w)),y=r.bottom+h+8<=innerHeight?r.bottom+5:Math.max(8,r.top-h-5);
- tip.style.left=x+'px';tip.style.top=y+'px';
-}
-document.addEventListener('pointerover',e=>{
- if(e.pointerType&&e.pointerType!=='mouse')return;
- const choice=e.target.closest('.exp-choice');if(choice&&!choice.contains(e.relatedTarget))showExpeditionTip(choice);
-});
-document.addEventListener('pointerout',e=>{
- const choice=e.target.closest('.exp-choice');if(choice&&!choice.contains(e.relatedTarget))hideExpeditionTip();
-});
-document.addEventListener('click',hideExpeditionTip,true);
-document.addEventListener('scroll',hideExpeditionTip,true);
-document.addEventListener('keydown',hideExpeditionTip);
-document.addEventListener('toggle',e=>{if(e.target.matches?.('.exp-picker')&&!e.target.open)hideExpeditionTip();},true);
-window.addEventListener('resize',hideExpeditionTip);
 })();
 </script>
 </body>
