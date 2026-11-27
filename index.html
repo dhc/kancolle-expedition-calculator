@@ -346,29 +346,31 @@ function calendarCounts(r,period){
  const has=(obj,key)=>Object.prototype.hasOwnProperty.call(obj||{},key);
  const baseFor=d=>{
   const key=d.toISOString().slice(0,10),yr=d.getUTCFullYear(),weekday=d.getUTCDay();
-  if(r.holidays&&(JP_HOLIDAYS[yr]||'').split(' ').includes(key.slice(5)))return {id:r.holidayId||'',normal:false};
-  const off=(r.daysOff||[0,6]).includes(weekday);
-  const id=r.advanced&&has(r.weekdays,weekday)?r.weekdays[weekday]:(off?r.holidayId:r.normalId);
-  return {id:id||'',normal:!off&&id===r.normalId};
+  if(r.holidays&&(JP_HOLIDAYS[yr]||'').split(' ').includes(key.slice(5)))return r.holidayId||'';
+  return (r.advanced&&has(r.weekdays,weekday)?r.weekdays[weekday]:(r.daysOff||[0,6]).includes(weekday)?r.holidayId:r.normalId)||'';
  };
+ const rules=[{presetId:r.maintenanceId,replaceId:r.normalId,count:r.maintenanceCount,name:'メンテナンス'},...(r.extraExceptions||[])].filter(x=>x.presetId!==undefined&&x.presetId!==x.replaceId&&Number(x.count)>0);
  for(let t=+start;t<+end;t+=day){
-  const d=new Date(t),key=d.toISOString().slice(0,10),month=key.slice(0,7),base=baseFor(d),overridden=has(r.overrides,key);
+  const d=new Date(t),key=d.toISOString().slice(0,10),month=key.slice(0,7);
   if(r.holidays&&!JP_HOLIDAYS[d.getUTCFullYear()])unknown.add(d.getUTCFullYear());
-  addCount((overridden?r.overrides[key]:base.id)||'',1);
-  if(!months.has(month))months.set(month,0);
-  if(base.normal&&!overridden)months.set(month,months.get(month)+1);
+  addCount((has(r.overrides,key)?r.overrides[key]:baseFor(d))||'',1);
+  if(!months.has(month))months.set(month,[]);
  }
- for(const [month,portion] of months){
-  const [yy,mm]=month.split('-').map(Number),size=new Date(Date.UTC(yy,mm,0)).getUTCDate();
-  let confirmed=0,eligible=0;
+ for(const [month] of months){
+  const [yy,mm]=month.split('-').map(Number),size=new Date(Date.UTC(yy,mm,0)).getUTCDate(),available={},confirmed={},portion={};
   for(let i=1;i<=size;i++){
-   const d=new Date(Date.UTC(yy,mm-1,i)),key=d.toISOString().slice(0,10),overridden=has(r.overrides,key);
-   if(overridden&&r.maintenanceId&&r.overrides[key]===r.maintenanceId)confirmed++;
-   if(baseFor(d).normal&&!overridden)eligible++;
+   const d=new Date(Date.UTC(yy,mm-1,i)),key=d.toISOString().slice(0,10),origin=baseFor(d),inside=+d>=+start&&+d<+end;
+   if(has(r.overrides,key)){const k=JSON.stringify([origin,r.overrides[key]||'']);confirmed[k]=(confirmed[k]||0)+1;}
+   else{available[origin]=(available[origin]||0)+1;if(inside)portion[origin]=(portion[origin]||0)+1;}
   }
-  const wanted=Math.max(0,clamp(r.maintenanceCount,0,31)-confirmed),allowed=Math.min(wanted,eligible);
-  if(wanted>eligible&&r.maintenanceId)warnings.push(month+'：メンテ見込み日数が通常日の残りを超えています。');
-  if(r.maintenanceId&&eligible&&r.normalId!==r.maintenanceId){const n=allowed*portion/eligible;addCount(r.normalId||'',-n);addCount(r.maintenanceId,n);}
+  for(const x of rules){
+   const from=x.replaceId||'',to=x.presetId||'',k=JSON.stringify([from,to]),desired=clamp(x.count,0,31),used=Math.min(desired,confirmed[k]||0);
+   confirmed[k]=(confirmed[k]||0)-used;
+   const wanted=desired-used,eligible=available[from]||0,allowed=Math.min(wanted,eligible);
+   if(wanted>eligible)warnings.push(month+'：'+(x.name||'例外運用')+'の見込み日数が置換元の残りを超えています。');
+   if(!eligible||!allowed)continue;
+   const n=allowed*(portion[from]||0)/eligible;addCount(from,-n);addCount(to,n);available[from]-=allowed;portion[from]=(portion[from]||0)-n;
+  }
  }
  if(unknown.size)warnings.push([...unknown].join('、')+'年の祝日データは未収録です。曜日のみで集計しています。');
  return {counts,days:(end-start)/day,months:period==='weekly'?0:period==='monthly'?1:12,warnings,label:start.toISOString().slice(0,10)+' ～ '+new Date(+end-day).toISOString().slice(0,10)};
@@ -702,7 +704,7 @@ function expeditionOption(exp,chosen,attrs){
 function expeditionPicker(selected,monthly,attrs){
  const exp=EXP_MAP.get(selected);
  const pool=monthly===null?EXP:EXP.filter(x=>x.monthly===!!monthly);
- const title=exp?`${exp.id} · ${exp.name}`:'遠征を選択';
+ const title=exp?`${exp.id} · ${exp.name}${exp.monthly?' ［月次］':''}`:'遠征を選択';
  return `<div class="field exp-field"><label>遠征</label><details class="exp-picker">
   <summary class="exp-picker-trigger" data-exp-id="${esc(exp?.id||'')}" aria-label="遠征の選択：${esc(title)}"><span class="exp-option-title">${esc(title)}</span><span class="exp-caret" aria-hidden="true">▾</span>${exp?`<span class="exp-option-meta"><span class="exp-resources">${expeditionBadges(exp)}</span><span class="exp-time">${expeditionDuration(exp.minutes)}</span></span>`:''}</summary>
   <div class="exp-picker-menu"><div class="exp-picker-search"><input type="search" placeholder="遠征番号・名前で検索" aria-label="遠征を検索" autocomplete="off"><div class="exp-mode-switch" role="group" aria-label="報酬表示">${expeditionModeButtons()}</div></div>
@@ -936,11 +938,11 @@ function renderMappingGroups(rows,monthly,presetId){
 function renderFleetMapping(){
  const preset=presetById(ui.selectedPreset)||state.presets[0];
  if(!preset)return '<div class="empty">プリセットがありません。</div>';
- return `<div class="stack"><section class="panel section"><div class="sectionhead"><div><h2>編成別の遠征割当</h2><p>艦隊を起点に遠征を登録・編集します。「運用プリセット」と同じデータを操作します。</p></div></div>
+ return `<div class="stack"><section class="panel section"><div class="sectionhead"><div><h2>編成別の遠征割当</h2><p>艦隊を起点に遠征を登録・編集します。スケジューラーと同じデータを操作します。</p></div></div>
  <div class="preset-list">${state.presets.map(p=>`<button type="button" class="preset-tab ${p.id===preset.id?'selected':''}" data-action="choose-preset" data-pid="${esc(p.id)}">${esc(p.name)}<span>${p.rows.length}種類の遠征</span></button>`).join('')}</div>
  ${renderOccupation(preset)}
  <div class="map-groups">${renderMappingGroups(preset.rows,false,preset.id)}</div>
- <p class="note">この画面で遠征・回数・使用編成を変えると「運用プリセット」画面にも反映されます。編成なしでも遠征を登録できます。</p>
+ <p class="note">この画面で遠征・回数・使用編成を変えるとスケジューラーにも反映されます。編成なしでも遠征を登録できます。</p>
  </section><section class="panel section"><details ${ui.monthlyMappingOpen?'open':''}><summary class="map-monthly-summary">月次遠征を編成別に編集（${state.monthlyRows.length}件）</summary><p class="note">月次遠征は月1回の実施とし、日次プリセットの72時間の判定には加えません。</p>
  ${renderMappingGroups(state.monthlyRows,true,'')}
  </details></section></div>`;
@@ -970,6 +972,9 @@ function renderOperationRules(plan){
  <label class="check-field"><input type="checkbox" data-change="operation-rule" data-field="holidays" ${r.holidays?'checked':''}> 祝日・振替休日も休日扱いにする</label>
  <div class="divider"></div><div class="operation-rule-row"><div><strong>メンテナンス日</strong><p class="note">通常日から置き換える</p></div>${select('maintenanceId',r.maintenanceId)}</div>
  <div class="operation-rule-row"><label>想定頻度（日／月）</label><input type="number" min="0" max="31" step="1" data-change="operation-rule" data-field="maintenanceCount" value="${esc(r.maintenanceCount)}"></div>
+ <div class="divider"></div><h3>追加の例外運用</h3>
+ ${(r.extraExceptions||[]).map((x,i)=>`<div class="exception-row"><input type="text" aria-label="例外名" data-change="operation-extra" data-index="${i}" data-field="name" value="${esc(x.name)}"><select aria-label="適用プリセット" data-change="operation-extra" data-index="${i}" data-field="presetId">${options(opts,x.presetId)}</select><select aria-label="置換元" data-change="operation-extra" data-index="${i}" data-field="replaceId">${options(opts,x.replaceId)}</select><input type="number" aria-label="月あたり日数" min="0" max="31" data-change="operation-extra" data-index="${i}" data-field="count" value="${esc(x.count)}">${button('operation-extra-remove','削除','btn tiny danger',`data-index="${i}"`)}</div>`).join('')}
+ ${button('operation-extra-add','＋ 例外運用を追加')}<p class="note">適用先・置換元・月あたりの日数を指定します。</p>
  <div class="operation-rule-row"><label>集計の基準日</label><input type="date" data-change="operation-rule" data-field="reference" value="${esc(r.reference)}"></div>
  <p class="note">週間は基準日を含む月～日、月間・年間は基準日の暦月・暦年。未確定メンテ日は見込み日数として按分します。</p>
  <details ${ui.operationDetails?'open':''} class="operation-details"><summary>詳細設定（任意）</summary>
@@ -1090,6 +1095,7 @@ function handleClick(e){
   update(()=>{const {row}=findRow(b);if(row)row.expId=d.value;});
   return;
  }
+ if(a==='operation-extra-add'||a==='operation-extra-remove'){update(()=>{const r=state.operationRules??=E.operationRules(state);r.extraExceptions??=[];if(a==='operation-extra-add')r.extraExceptions.push({name:'例外運用',presetId:state.presets[2]?.id||'',replaceId:r.holidayId,count:1});else r.extraExceptions.splice(Number(d.index),1);});return;}
  if(a==='operation-day'){update(()=>{const r=state.operationRules??=E.operationRules(state);const day=Number(d.day);r.daysOff=r.daysOff.includes(day)?r.daysOff.filter(x=>x!==day):[...r.daysOff,day];});return;}
  if(a==='operation-override-add'){const date=one('#operation-override-date')?.value,id=one('#operation-override-preset')?.value;if(date)update(()=>{const r=state.operationRules??=E.operationRules(state);r.overrides??={};r.overrides[date]=id;});return;}
  if(a==='operation-override-remove'){update(()=>{const r=state.operationRules??=E.operationRules(state);delete r.overrides[d.date];});return;}
@@ -1116,7 +1122,7 @@ function handleClick(e){
    else if(a==='simple-remove-block')state.simpleBlocks=state.simpleBlocks.filter(x=>x.id!==d.bid);
    else if(a==='simple-add-row'&&block)block.rows.push({id:uid(),expId:'02',count:1,daihatsu:false,kira:false});
    else if(a==='simple-remove-row'&&block)block.rows=block.rows.filter(x=>x.id!==d.rid);
-   else if(a==='simple-export'&&block){const p={id:uid(),name:block.name.trim()||'簡易計算から出力',dayStart:0,rows:block.rows.filter(x=>EXP_MAP.has(x.expId)&&x.count>0).map(x=>({...E.simpleExpRow(x,EXP_MAP.get(x.expId),state.settings),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);ui.selectedPreset=p.id;ui.tab='scheduler';}
+   else if(a==='simple-export'&&block){const p={id:uid(),name:String(block.name||'').trim()||'簡易計算から出力',dayStart:0,rows:block.rows.filter(x=>EXP_MAP.has(x.expId)&&x.count>0).map(x=>({...E.simpleExpRow(x,EXP_MAP.get(x.expId),state.settings),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);ui.selectedPreset=p.id;ui.tab='scheduler';}
   });return;
  }
  if(a==='migrate-monthly'){if(!confirm('旧月次遠征を新規プリセットに移行します。運用設定で適用日を指定してください。'))return;update(()=>{const p={id:uid(),name:'月次遠征実施日',dayStart:0,rows:state.monthlyRows.map(x=>({...structuredClone(x),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);state.monthlyRows=[];ui.selectedPreset=p.id;});return;}
@@ -1143,7 +1149,7 @@ function handleClick(e){
   }else if(a==='remove-preset'){
    if(state.presets.length<=1){alert('最低1つのプリセットは必要です。');return}
    if(!confirm('プリセットを削除しますか？週間割当や月間例外の参照も削除します。'))return;
-   if(state.operationRules){const r=state.operationRules;for(const k of ['normalId','holidayId','maintenanceId'])if(r[k]===d.pid)r[k]='';for(const map of [r.weekdays||{},r.overrides||{}])for(const k of Object.keys(map))if(map[k]===d.pid)map[k]='';}state.presets=state.presets.filter(p=>p.id!==d.pid);state.weekly=state.weekly.filter(x=>x.presetId!==d.pid);state.exceptions=state.exceptions.filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);ui.selectedPreset=state.presets[0].id;
+   if(state.operationRules){const r=state.operationRules;for(const k of ['normalId','holidayId','maintenanceId'])if(r[k]===d.pid)r[k]='';r.extraExceptions=(r.extraExceptions||[]).filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);for(const map of [r.weekdays||{},r.overrides||{}])for(const k of Object.keys(map))if(map[k]===d.pid)map[k]='';}state.presets=state.presets.filter(p=>p.id!==d.pid);state.weekly=state.weekly.filter(x=>x.presetId!==d.pid);state.exceptions=state.exceptions.filter(x=>x.presetId!==d.pid&&x.replaceId!==d.pid);ui.selectedPreset=state.presets[0].id;
   }else if(a==='add-row'){const p=presetById(d.pid);p?.rows.push(E.makeRow('05'));}
   else if(a==='add-row-for-fleet'){
    const p=presetById(d.pid);if(p){const row=E.makeRow('05');row.fleetId=d.fid||'';if(row.fleetId){row.probMode='fleet';row.bonusMode='fleet'}p.rows.push(row);}
@@ -1165,6 +1171,7 @@ function handleClick(e){
 }
 function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)return;
  if(type==='simple-block'||type==='simple-row'){update(()=>{const block=simpleBlocks().find(x=>x.id===d.bid),obj=type==='simple-block'?block:block?.rows.find(x=>x.id===d.rid);if(obj)obj[d.field]=t.type==='checkbox'?t.checked:d.field==='count'?Math.round(E.clamp(t.value,0,200)):d.field==='multiplier'?E.clamp(t.value,0,100000):t.value;});return;}
+ if(type==='operation-extra'){update(()=>{const x=state.operationRules?.extraExceptions?.[Number(d.index)];if(x)x[d.field]=d.field==='count'?Math.round(E.clamp(t.value,0,31)):t.value;});return;}
  if(type==='operation-rule'||type==='operation-weekday'){update(()=>{const r=state.operationRules??=E.operationRules(state);if(type==='operation-weekday'){r.weekdays??={};if(t.value==='auto')delete r.weekdays[d.index];else r.weekdays[d.index]=t.value;}else r[d.field]=t.type==='checkbox'?t.checked:d.field==='maintenanceCount'?Math.round(E.clamp(t.value,0,31)):t.value|| (d.field==='reference'?r.reference:'');});return;}
  if(type==='compareA'||type==='compareB'){ui[type]=t.value;render();return}
  if(type==='schedule-away'){
