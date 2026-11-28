@@ -1069,7 +1069,7 @@ function renderScheduler(){
  <p class="note">例：0900〜1800、2300〜0700。日付をまたぐ設定も可能です。登録済みの出発予定は自動変更しません。</p></section>`;
  const detail=`<details class="panel section" ${ui.scheduleDetails?'open':''} id="schedule-details"><summary>遠征の補正・補給費設定</summary>${p.rows.map(row=>renderRow(row,'preset',p.id)).join('')}${button('add-row','＋ 遠征を追加','btn',`data-pid="${esc(p.id)}"`)}</details>`;
  const legacy=state.monthlyRows.length?`<details class="panel section"><summary>旧月次遠征データ（互換設定）</summary><p class="note">従来の月次加算設定です。必要に応じて新規プリセットへ移行できます。</p>${state.monthlyRows.map(row=>renderRow(row,'monthly','')).join('')}${button('migrate-monthly','新規プリセットに移行','btn primary')}</details>`:'';
- const top=`<section class="panel section"><div class="sectionhead"><div><h2>運用プリセット</h2><p>設計する運用パターンを選択し、1日の基準時刻と触れない時間帯を設定します。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
+ const top=`<section class="panel section"><div class="sectionhead"><div><h2>運用プリセット</h2><p>遠征ごとの出発時刻と使用編成を設定します。「艦隊・装備」で登録した編成を割り当てると、大成功率・大発補正・補給費を編成から試算できます。編成の割り当ては任意です。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
  <div class="preset-list">${state.presets.map(x=>`<button type="button" class="preset-tab ${x.id===p.id?'selected':''}" data-action="choose-preset" data-pid="${esc(x.id)}">${esc(x.name)}<span>${x.rows.reduce((n,r)=>n+E.clamp(r.count,0,200),0)}回 / 日</span></button>`).join('')}</div>
  <div class="row-wrap"><div class="field grow"><label>プリセット名</label><input type="text" data-change="preset-name" data-pid="${esc(p.id)}" value="${esc(p.name)}" maxlength="50"></div>${button('remove-preset','削除','btn danger',`data-pid="${esc(p.id)}"`)}</div>
  <div class="schedule-day-start"><div class="field schedule-clock"><label>1日の基準時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" placeholder="0500" value="${E.clockDigits(dayStart)}" data-change="schedule-base" data-pid="${esc(p.id)}" aria-label="1日の基準時刻（4桁）"></div><div class="note">このプリセットの1日：<strong>${E.clockString(dayStart)} 〜 ${E.clockString(dayStart+1440)}</strong>。超過する予定も登録できますが、警告を表示します。</div></div>
@@ -1168,12 +1168,12 @@ function simpleTable(out){
 }
 function renderSimple(){
  const blocks=simpleBlocks(),calc=E.simpleCalculate(blocks,state.settings,EXP);
- return `<div class="stack"><section class="panel section"><h2>簡易収支計算器</h2><p class="note">現在の遠征回数を入力し、倍率を掛けて合算します。艦隊や時刻の設定は不要です。</p><p class="note">大発ありは＋20%の仮定、キラなしは通常成功、キラありは共通大成功率（${fmt(state.settings.commonGreatPct)}%）を使用。最小編成・補給費未登録の遠征は純収支を表示しません。</p></section>
+ return `<div class="stack"><section class="panel section"><h2>簡易収支計算器</h2><p class="note">艦隊や時刻を設定せず、遠征名・回数・倍率から獲得量を概算します。</p><p class="note">「大発」ありは報酬＋20%、「キラ」ありは共通大成功率（現在 ${fmt(state.settings.commonGreatPct)}%）で概算します。「キラ」なしは通常成功で計算します。</p><p class="note">実際の編成で大成功率や補給費を試算するには、「艦隊・装備」で艦隊を登録し、「スケジューラー」の「使用編成」に割り当てます。</p></section>
  ${blocks.map((b,i)=>`<section class="panel section"><div class="row-wrap"><strong>条件 ${i+1}</strong><div class="field grow"><input type="text" placeholder="条件名（任意）" aria-label="条件名" data-change="simple-block" data-field="name" data-bid="${esc(b.id)}" value="${esc(b.name)}"></div>${button('simple-remove-block','削除','btn tiny danger',`data-bid="${esc(b.id)}"`)}</div>
  ${b.rows.map(row=>{const attr=`data-bid="${esc(b.id)}" data-rid="${esc(row.id)}"`;return `<div class="simple-row">${expeditionPicker(row.expId,null,attr)}${numberField('回数',row.count,`min="0" max="200" step="1" data-change="simple-row" data-field="count" ${attr}`,'count')}<label class="check-field"><input type="checkbox" data-change="simple-row" data-field="daihatsu" ${attr} ${row.daihatsu?'checked':''}>大発</label><label class="check-field"><input type="checkbox" data-change="simple-row" data-field="kira" ${attr} ${row.kira?'checked':''}>キラ</label>${button('simple-remove-row','削除','btn tiny danger',attr)}</div>`;}).join('')}
  ${button('simple-add-row','＋ 遠征を追加','btn',`data-bid="${esc(b.id)}"`)}
  <div class="row-wrap" style="margin:14px 0"><strong>×</strong>${numberField('倍率',b.multiplier,`min="0" max="100000" step="1" data-change="simple-block" data-field="multiplier" data-bid="${esc(b.id)}"`,'count')}<span>回分（日数など）</span></div>
- ${simpleTable(calc.results[i])}<div class="row-wrap" style="justify-content:flex-end">${button('simple-export','スケジューラーへ出力','btn',`data-bid="${esc(b.id)}"`)}</div></section>`).join('')}
+ ${simpleTable(calc.results[i])}<div class="row-wrap" style="justify-content:flex-end"><span class="note">この条件を新しい運用プリセットにコピーします。</span>${button('simple-export','スケジューラーへ出力','btn',`data-bid="${esc(b.id)}"`)}</div></section>`).join('')}
  ${button('simple-add-block','＋ 計算条件を追加','btn primary')}<section class="panel section"><h2>全条件の合計</h2>${simpleTable(calc.total)}</section></div>`;
 }
 function renderPlan(){
@@ -1673,7 +1673,7 @@ document.addEventListener('toggle',e=>{
 window.addEventListener('resize',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu));
 window.addEventListener('scroll',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu),{passive:true});
 const oldRender=render;
-render=function(){oldRender();const summary=document.querySelector('.summary');if(!summary)return;const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（編成から推定できない行や「共通確率」の行、簡易計算の「キラ」ありに使用）</span>`;summary.appendChild(bar);};
+render=function(){oldRender();const summary=document.querySelector('.summary');if(!summary)return;const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率（概算用）</span><input type="number" aria-label="共通大成功率" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　「共通確率」の遠征、「編成から推定」で情報が足りない遠征、簡易計算の「キラ」ありに適用します。</span>`;summary.appendChild(bar);};
 schedulePresets();
 persist();
 render();
