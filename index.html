@@ -284,7 +284,7 @@ function occupationForRows(rows,fleets,expeditions,monthly=false){
  const map=new Map(expeditions.map(x=>[x.id,x]));
  const groups=new Map();
  for(const f of fleets||[])groups.set(String(f.id),{id:String(f.id),name:f.name||'名称未設定',minutes:0,runs:0,assigned:true});
- groups.set('',{id:'',name:'編成なし',minutes:0,runs:0,assigned:false});
+ groups.set('',{id:'',name:'編成未割当',minutes:0,runs:0,assigned:false});
  const details=[];let totalMinutes=0,totalRuns=0;
  for(const row of rows||[]){
    const exp=map.get(row.expId);if(!exp||(monthly!==null&&!!exp.monthly!==!!monthly))continue;
@@ -713,7 +713,7 @@ function expeditionPicker(selected,monthly,attrs){
   <div class="exp-picker-results">${expeditionSortHeader()}<div class="exp-choice-list">${pool.map(x=>expeditionOption(x,x.id===selected,attrs)).join('')}</div></div>
   <div class="exp-picker-empty hidden">一致する遠征がありません</div><div class="exp-result-count" aria-live="polite">${pool.length} / ${pool.length} 件表示</div></div></details></div>`;
 }
-function fleetOptions(selected){return options([{value:'',label:'編成なし'},...state.fleets.map(f=>({value:f.id,label:f.name}))],selected)}
+function fleetOptions(selected){return options([{value:'',label:'未割当'},...state.fleets.map(f=>({value:f.id,label:f.name}))],selected)}
 function numberField(label,value,attrs='',cls='narrow'){return `<div class="field ${cls}"><label>${esc(label)}</label><input type="number" value="${esc(value)}" ${attrs}></div>`}
 function selectField(label,items,value,attrs='',cls='medium'){return `<div class="field ${cls}"><label>${esc(label)}</label><select ${attrs}>${options(items,value)}</select></div>`}
 function button(action,label,className='btn',attrs=''){return `<button type="button" class="${className}" data-action="${action}" ${attrs}>${label}</button>`}
@@ -757,9 +757,9 @@ function renderOccupation(preset){
  return `<div class="occupation"><div class="row-between"><h3>編成別の占有時間 / 1日</h3><span class="chip ${occ.totalMinutes>4320?'amber':'green'}">合計 ${E.formatOccupation(occ.totalMinutes)} / 72時間</span></div>
  <div class="occ-meter total-meter"><div class="occ-fill ${occ.totalMinutes>4320?'over':''}" style="width:${Math.min(100,occ.totalMinutes/4320*100)}%"></div></div>
  ${active.length?active.map(meter).join(''):'<div class="note" style="margin-top:8px">遠征を登録すると、編成別の占有時間が表示されます。</div>'}
- ${!active.some(g=>!g.assigned)?'<div class="note">編成なし：0時間</div>':''}
+ ${!active.some(g=>!g.assigned)?'<div class="note">編成未割当：0時間</div>':''}
  ${occ.warnings.map(w=>`<div class="warning">${esc(w)}</div>`).join('')}
- ${occ.unassignedMinutes>0?'<p class="note">「編成なし」も総占有時間に算入しています。個別の24時間上限は編成が未指定のため判定できません。</p>':''}
+ ${occ.unassignedMinutes>0?'<p class="note">「編成未割当」も総占有時間に算入しています。個別の24時間上限は編成が未指定のため判定できません。</p>':''}
  <p class="note">所要時間×実施回数による延べ時間です。補給・入替の時間、実際の出発時刻や同時運用の可否は判定しません。</p>
  </div>`;
 }
@@ -854,7 +854,7 @@ function renderSchedulerTimeline(audit,preset){
    const absoluteStart=E.dayAbsoluteMinute(s.start,base)+Math.max(0,Number(s.dayOffset)||0)*1440;
    const startText=E.clockString(absoluteStart);
    const endText=E.clockString(absoluteStart+s.duration);
-   const title=`${s.exp.name}  ${startText}〜${endText}  ${s.row.fleetId?(fleetById(s.row.fleetId)?.name||'編成不明'):'編成なし'}`;
+   const title=`${s.exp.name}  ${startText}〜${endText}  ${s.row.fleetId?(fleetById(s.row.fleetId)?.name||'編成不明'):'編成未割当'}`;
    if(relativeEnd>relativeStart)result+=`<div class="timeline-bar ${s.exp.monthly?'timeline-monthly ':''}${timelineOverlap(s,audit.runs)?'timeline-conflict':''}" data-drag-sid="${esc(s.id)}" data-pid="${esc(preset.id)}" data-relative="${relativeStart}" title="${esc(title)}" style="left:${relativeStart/14.4}%;width:${(relativeEnd-relativeStart)/14.4}%"><span>${esc(s.exp.name)}</span></div>`;
   }
   return result;
@@ -930,7 +930,7 @@ function renderScheduler(){
 
 function renderMappingGroups(rows,monthly,presetId){
  const occ=E.occupationForRows(rows,state.fleets,EXP,monthly?true:null);
- const groupDefs=[...state.fleets.map(f=>({id:String(f.id),name:f.name})),{id:'',name:'編成なし'}];
+ const groupDefs=[...state.fleets.map(f=>({id:String(f.id),name:f.name})),{id:'',name:'編成未割当'}];
  return groupDefs.map(g=>{
    const list=rows.filter(r=>String(r.fleetId||'')===g.id || (g.id===''&&!fleetById(r.fleetId)));
    const group=occ.groups.find(x=>x.id===g.id);
@@ -947,7 +947,7 @@ function renderFleetMapping(){
  <div class="preset-list">${state.presets.map(p=>`<button type="button" class="preset-tab ${p.id===preset.id?'selected':''}" data-action="choose-preset" data-pid="${esc(p.id)}">${esc(p.name)}<span>${p.rows.length}種類の遠征</span></button>`).join('')}</div>
  ${renderOccupation(preset)}
  <div class="map-groups">${renderMappingGroups(preset.rows,false,preset.id)}</div>
- <p class="note">この画面で遠征・回数・使用編成を変えるとスケジューラーにも反映されます。編成なしでも遠征を登録できます。</p>
+ <p class="note">この画面で遠征・回数・使用編成を変えるとスケジューラーにも反映されます。編成が未割当でも遠征を登録できます。</p>
  </section><section class="panel section"><details ${ui.monthlyMappingOpen?'open':''}><summary class="map-monthly-summary">月次遠征を編成別に編集（${state.monthlyRows.length}件）</summary><p class="note">月次遠征は月1回の実施とし、日次プリセットの72時間の判定には加えません。</p>
  ${renderMappingGroups(state.monthlyRows,true,'')}
  </details></section></div>`;
@@ -1018,7 +1018,7 @@ function renderPlan(){
  </div>`;
 }
 function renderFleet(){
- const f=fleetById(ui.selectedFleet)||state.fleets[0];if(!f)return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成なしでも獲得量は計算できます。登録すると大成功率・大発補正・補給費を計算できます。</p></div>${button('add-fleet','+ 編成を作成','btn primary')}</div><div class="empty">まだ編成がありません。手動で作るか、デッキビルダー形式をインポートできます。</div>${renderImport()}</section>`;
+ const f=fleetById(ui.selectedFleet)||state.fleets[0];if(!f)return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成が未割当でも獲得量は計算できます。登録すると大成功率・大発補正・補給費を計算できます。</p></div>${button('add-fleet','+ 編成を作成','btn primary')}</div><div class="empty">まだ編成がありません。手動で作るか、デッキビルダー形式をインポートできます。</div>${renderImport()}</section>`;
  const b=E.equipmentTotals(f);
  return `<div class="stack"><section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成名を付けて遠征行に割り当てます。編成IDを保持するため名前を変えても参照は維持されます。</p></div><div class="row-wrap">${button('add-fleet','+ 新規編成','btn primary')}${button('remove-fleet','この編成を削除','btn danger')}</div></div>
  <div class="preset-list">${state.fleets.map(x=>`<button class="preset-tab ${x.id===f.id?'selected':''}" data-action="choose-fleet" data-fid="${esc(x.id)}">${esc(x.name)}<span>${(x.ships||[]).length}隻</span></button>`).join('')}</div>
