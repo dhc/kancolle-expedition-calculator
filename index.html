@@ -1133,7 +1133,7 @@ function matchingShips(query,type){
  return E.SHIP_MASTER_ROWS.filter(([id,name,stype])=>(type==='all'||shipTypeLabel(stype)===type)&&normalizeShipQuery(name).includes(q));
 }
 function shipPickerTrigger(ship,fleetId,index){
- const known=E.shipMaster(ship.shipId),name=ship.shipId||Object.keys(ship.overrides||{}).length?E.shipField(ship,'name'):'艦娘を選択';
+ const name=ship.shipId||Object.keys(ship.overrides||{}).length?E.shipField(ship,'name'):'艦娘を選択';
  return `<div class="field"><label>艦名</label><button type="button" class="ship-picker-trigger" data-action="ship-picker-open" data-fid="${esc(fleetId)}" data-index="${index}" aria-haspopup="dialog" aria-label="艦娘を選択：${esc(name)}"><span class="ship-trigger-name">${esc(name)}</span><span class="exp-caret" aria-hidden="true">▾</span></button></div>`;
 }
 function shipPickerDialog(){
@@ -1151,7 +1151,7 @@ function refreshShipPicker(dialog,scrollSelected=false){
  results.innerHTML=rows.length?rows.map(row=>shipChoice(row,selected)).join(''):'<div class="ship-picker-empty">該当する艦娘がありません。</div>';
  dialog.querySelector('#ship-picker-count').textContent=rows.length+' / '+E.SHIP_MASTER_ROWS.length+' 件表示';
  results.scrollTop=0;
- if(scrollSelected){const active=results.querySelector('[aria-pressed="true"]');if(active)results.scrollTop=Math.max(0,active.offsetTop-results.offsetTop-(results.clientHeight-active.offsetHeight)/2);}
+ if(scrollSelected){const active=results.querySelector('[aria-pressed="true"]');if(active)results.scrollTop=Math.max(0,results.scrollTop+active.getBoundingClientRect().top-results.getBoundingClientRect().top-(results.clientHeight-active.offsetHeight)/2);}
 }
 function openShipPicker(fid,index){
  const dialog=one('#ship-picker-dialog'),ship=fleetById(fid)?.ships[Number(index)];
@@ -1159,7 +1159,6 @@ function openShipPicker(fid,index){
  dialog.dataset.fid=fid;dialog.dataset.index=String(index);
  dialog.querySelector('#ship-picker-query').value='';
  dialog.querySelector('#ship-picker-type').value='all';
- refreshShipPicker(dialog);
  dialog.showModal();
  refreshShipPicker(dialog,true);
 }
