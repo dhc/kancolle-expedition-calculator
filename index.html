@@ -210,7 +210,7 @@ function applyShipMaster(ship,replace=false){
  if(replace||!ship.name||ship.name==='艦娘'||ship.name==='艦娘ID '+ship.shipId)ship.name=m.name;
  if(replace||legacy)ship.stype=m.stype;
  for(const key of ['fuel','ammo'])if(replace||ship[key]===null||ship[key]===undefined||ship[key]==='')ship[key]=m[key];
- if(replace||legacy||ship.kinu===undefined)ship.kinu=m.kinu;
+ if(replace||ship.kinu===undefined||(legacy&&m.kinu))ship.kinu=m.kinu;
  return true;
 }
 function hydrateShipMaster(state){
