@@ -210,7 +210,6 @@ function applyShipMaster(ship,replace=false){
  if(replace||!ship.name||ship.name==='艦娘'||ship.name==='艦娘ID '+ship.shipId)ship.name=m.name;
  if(replace||legacy)ship.stype=m.stype;
  for(const key of ['fuel','ammo'])if(replace||ship[key]===null||ship[key]===undefined||ship[key]==='')ship[key]=m[key];
- if(replace||ship.kinu===undefined||(legacy&&m.kinu))ship.kinu=m.kinu;
  return true;
 }
 function hydrateShipMaster(state){
@@ -239,7 +238,7 @@ function equipmentTotals(fleet){
    stars+=clamp(item.rf||0,0,10);starCount++;
  }
  // Manual drum counts have no ship assignment; can't verify drum-carrying ship count with only manual counts.
- const kinu=(fleet?.ships||[]).some(x=>x.kinu);
+ const kinu=(fleet?.ships||[]).some(x=>shipMaster(x.shipId)?.kinu===true);
  base=Math.min(.2,base+(kinu?.05:0));
  const averageStars=starCount?stars/starCount:0;
  const bonusStar=base*.01*averageStars;
@@ -1061,7 +1060,7 @@ function renderFleet(){
  return `<div class="stack"><section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成名を付けて遠征行に割り当てます。編成IDを保持するため名前を変えても参照は維持されます。</p></div><div class="row-wrap">${button('add-fleet','+ 新規編成','btn primary')}${button('remove-fleet','この編成を削除','btn danger')}</div></div>
  <div class="preset-list">${state.fleets.map(x=>`<button class="preset-tab ${x.id===f.id?'selected':''}" data-action="choose-fleet" data-fid="${esc(x.id)}">${esc(x.name)}<span>${(x.ships||[]).length}隻</span></button>`).join('')}</div>
  <div class="row-wrap"><div class="field grow"><label>編成名</label><input type="text" value="${esc(f.name)}" data-change="fleet-name" data-fid="${esc(f.id)}"></div></div>
- <div class="divider"></div><h3>所属艦娘</h3><p class="note">燃料・弾薬はケッコン前の満タン補給量です。艦娘IDから艦名・艦種・補給量・鬼怒改二を自動補完します。キラ状態は手動設定してください。</p>
+ <div class="divider"></div><h3>所属艦娘</h3><p class="note">燃料・弾薬はケッコン前の満タン補給量です。艦娘IDから艦名・艦種・補給量・鬼怒改二の固有補正を自動判定します。キラ状態は手動設定してください。</p>
  <datalist id="ship-master-options">${E.SHIP_MASTER_ROWS.map(([id,name,stype])=>`<option value="${id}" label="${esc(name+' / '+E.SHIP_TYPES[stype])}"></option>`).join('')}</datalist>
  ${(f.ships||[]).map((s,i)=>`<div class="fleetship"><div class="field"><label>艦名</label><input type="text" value="${esc(s.name)}" data-change="ship" data-fid="${esc(f.id)}" data-index="${i}" data-field="name" title="艦娘ID ${esc(s.shipId||'未設定')}"></div>
  ${numberField('Lv',s.level??1,`data-change="ship" data-fid="${esc(f.id)}" data-index="${i}" data-field="level" min="1" max="200" step="1"`,'')}
@@ -1069,7 +1068,6 @@ function renderFleet(){
  ${numberField('弾薬',s.ammo??'',`data-change="ship" data-fid="${esc(f.id)}" data-index="${i}" data-field="ammo" min="0" step="1" placeholder="未設定"`,'')}
  <label class="check-field"><input type="checkbox" data-change="ship-check" data-fid="${esc(f.id)}" data-index="${i}" data-field="married" ${s.married?'checked':''}> ケッコン</label>
  <label class="check-field"><input type="checkbox" data-change="ship-check" data-fid="${esc(f.id)}" data-index="${i}" data-field="kira" ${s.kira?'checked':''}> キラ</label>
- <label class="check-field"><input type="checkbox" data-change="ship-check" data-fid="${esc(f.id)}" data-index="${i}" data-field="kinu" ${s.kinu?'checked':''}> 鬼怒改二</label>
  ${button('remove-ship','×','btn tiny danger',`data-fid="${esc(f.id)}" data-index="${i}"`)}
  <div class="row-wrap" style="grid-column:1/-1;align-items:end"><div class="field"><label>艦娘ID（マスタ検索）</label><input type="text" inputmode="numeric" list="ship-master-options" value="${esc(s.shipId||'')}" data-change="ship-master-id" data-fid="${esc(f.id)}" data-index="${i}" placeholder="例：487" style="max-width:135px"></div><div class="field"><label>艦種</label><select data-change="ship" data-fid="${esc(f.id)}" data-index="${i}" data-field="stype">${options([{value:'',label:'未設定'},...Object.entries(E.SHIP_TYPES).map(([id,name])=>({value:id,label:name+(id==='8'?'（艦種ID8）':id==='9'?'（艦種ID9）':id==='15'?'（艦種ID15）':id==='22'?'（艦種ID22）':'')}))],s.stype??'')}</select></div><span class="note">${E.shipMaster(s.shipId)?'マスタ登録済み':s.shipId?'マスタ未登録・手動設定':'ID入力で自動補完'}</span></div>
  ${(s.items||[]).length?`<div class="subtle" style="grid-column:1/-1">読込装備：${(s.items||[]).map(x=>{const e=E.EQUIPMENT[Number(x.id)];return esc((e?e.name:'装備ID '+x.id)+(x.rf?' ★'+x.rf:''))}).join(' / ')}</div>`:''}</div>`).join('')}
@@ -1079,7 +1077,7 @@ function renderFleet(){
  <p class="note">特大発の別枠上限、大発系の基本20%上限、改修補正、鬼怒改二固有+5%に対応しています。一部の特殊大発は装備IDが未登録のため、必要に応じて遠征行ごとの「手動補正率」を利用してください。</p>
  <div class="notice">読み込んだ装備のうち、補正計算に使用するID：68 大発 / 193 特大発 / 166 陸戦隊 / 167 内火艇 / 408 AB艇 / 409 武装大発 / 75 ドラム缶。</div></section>${renderImport()}</div>`;
 }
-function renderImport(){return `<section class="panel section"><div class="sectionhead"><div><h2>制空権シミュレータからインポート</h2><p>「共有」→デッキビルダー形式のJSONをコピーして貼り付けます。</p></div></div><textarea id="deck-text" placeholder='{"version":4,"f1":{"s1":{"id":"487","lv":99,"items":{"i1":{"id":68,"rf":10}}}}}'></textarea><div class="row-wrap" style="margin-top:10px">${button('import-deck','デッキビルダーJSONを読み込む','btn primary')}</div><p class="note">f1〜f4の各艦隊を別々の編成として登録します。艦娘ID・Lv・装備ID・改修値を取り込みます。艦娘マスタに登録されているIDは艦名・艦種・基礎補給量・鬼怒改二を自動設定します。未知IDは手動設定、キラ状態は手動入力です。ネットへの送信はありません。</p><p class="note">艦娘マスタ：${E.SHIP_MASTER_ROWS.length}件。出典：<a href="${E.SHIP_MASTER_SOURCE}" target="_blank" rel="noopener">kcwiki/kancolle-data（api_start2）</a> ／ データ識別子 ${E.SHIP_MASTER_SHA.slice(0,12)}。</p><div id="import-status">${ui.importNotice?`<div class="notice">${esc(ui.importNotice)}</div>`:''}</div></section>`}
+function renderImport(){return `<section class="panel section"><div class="sectionhead"><div><h2>制空権シミュレータからインポート</h2><p>「共有」→デッキビルダー形式のJSONをコピーして貼り付けます。</p></div></div><textarea id="deck-text" placeholder='{"version":4,"f1":{"s1":{"id":"487","lv":99,"items":{"i1":{"id":68,"rf":10}}}}}'></textarea><div class="row-wrap" style="margin-top:10px">${button('import-deck','デッキビルダーJSONを読み込む','btn primary')}</div><p class="note">f1〜f4の各艦隊を別々の編成として登録します。艦娘ID・Lv・装備ID・改修値を取り込みます。艦娘マスタに登録されているIDは艦名・艦種・基礎補給量を自動設定し、鬼怒改二の固有補正を自動判定します。未知IDは手動設定、キラ状態は手動入力です。ネットへの送信はありません。</p><p class="note">艦娘マスタ：${E.SHIP_MASTER_ROWS.length}件。出典：<a href="${E.SHIP_MASTER_SOURCE}" target="_blank" rel="noopener">kcwiki/kancolle-data（api_start2）</a> ／ データ識別子 ${E.SHIP_MASTER_SHA.slice(0,12)}。</p><div id="import-status">${ui.importNotice?`<div class="notice">${esc(ui.importNotice)}</div>`:''}</div></section>`}
 function renderCompare(){
  const all=[{value:'current',label:'編集中の現在条件'},...snaps.map(x=>({value:x.id,label:x.name}))];
  if(!snaps.some(x=>x.id===ui.compareA))ui.compareA=snaps[0]?.id||'current';
@@ -1113,7 +1111,7 @@ function render(){
 function findRow(el){const ds=el.dataset;const arr=ds.scope==='monthly'?state.monthlyRows:presetById(ds.pid)?.rows;return {arr,row:arr?.find(x=>x.id===ds.rid)};}
 function removeFleetRefs(id){for(const p of state.presets)for(const row of p.rows)if(row.fleetId===id)row.fleetId='';for(const row of state.monthlyRows)if(row.fleetId===id)row.fleetId='';}
 function addFleet(){const f={id:uid(),name:`編成${state.fleets.length+1}`,ships:[],extraEquipment:{}};state.fleets.push(f);ui.selectedFleet=f.id;}
-function newShip(){return {id:uid(),shipId:'',name:'艦娘',stype:null,level:99,married:false,kira:false,kinu:false,fuel:null,ammo:null,items:[]}}
+function newShip(){return {id:uid(),shipId:'',name:'艦娘',stype:null,level:99,married:false,kira:false,fuel:null,ammo:null,items:[]}}
 function handleClick(e){
  const selectedPicker=e.target.closest('.exp-picker');
  // Only one picker may be open; outside click closes the menu without changing data.
@@ -1216,7 +1214,7 @@ function handleClick(e){
  });
 }
 function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)return;
- if(type==='ship-master-id'){update(()=>{const ship=fleetById(d.fid)?.ships[Number(d.index)];if(!ship)return;const id=t.value.trim();if(id===String(ship.shipId||''))return;ship.shipId=id;ship.name=id?'艦娘ID '+id:'艦娘';ship.stype=null;ship.fuel=null;ship.ammo=null;ship.kinu=false;E.applyShipMaster(ship,true);});return;}
+ if(type==='ship-master-id'){update(()=>{const ship=fleetById(d.fid)?.ships[Number(d.index)];if(!ship)return;const id=t.value.trim();if(id===String(ship.shipId||''))return;ship.shipId=id;ship.name=id?'艦娘ID '+id:'艦娘';ship.stype=null;ship.fuel=null;ship.ammo=null;E.applyShipMaster(ship,true);});return;}
  if(type==='simple-block'||type==='simple-row'){update(()=>{const block=simpleBlocks().find(x=>x.id===d.bid),obj=type==='simple-block'?block:block?.rows.find(x=>x.id===d.rid);if(obj)obj[d.field]=t.type==='checkbox'?t.checked:d.field==='count'?Math.round(E.clamp(t.value,0,200)):d.field==='multiplier'?E.clamp(t.value,0,100000):t.value;});return;}
  if(type==='operation-extra'){update(()=>{const x=state.operationRules?.extraExceptions?.[Number(d.index)];if(x)x[d.field]=d.field==='count'?Math.round(E.clamp(t.value,0,31)):t.value;});return;}
  if(type==='operation-rule'||type==='operation-weekday'){update(()=>{const r=state.operationRules??=E.operationRules(state);if(type==='operation-weekday'){r.weekdays??={};if(t.value==='auto')delete r.weekdays[d.index];else r.weekdays[d.index]=t.value;}else r[d.field]=t.type==='checkbox'?t.checked:d.field==='maintenanceCount'?Math.round(E.clamp(t.value,0,31)):t.value|| (d.field==='reference'?r.reference:'');});return;}
@@ -1275,7 +1273,7 @@ function parseDeck(raw){
    const s=group[`s${si}`];if(!s||!s.id||String(s.id)==='0')continue;
    const items=Object.values(s.items||{}).filter(x=>x&&x.id&&Number(x.id)>0).map(x=>({id:Number(x.id),rf:Number(x.rf||0)}));
    const level=Number(s.lv||1);
-   const ship={id:uid(),shipId:String(s.id),name:`艦娘ID ${s.id}`,stype:null,level,married:level>=100,kira:false,kinu:false,fuel:null,ammo:null,items};E.applyShipMaster(ship,true);ships.push(ship);
+   const ship={id:uid(),shipId:String(s.id),name:`艦娘ID ${s.id}`,stype:null,level,married:level>=100,kira:false,fuel:null,ammo:null,items};E.applyShipMaster(ship,true);ships.push(ship);
   }
   if(ships.length)result.push({id:uid(),name:`インポート艦隊${fi}`,ships,extraEquipment:{}});
  }
