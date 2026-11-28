@@ -215,6 +215,12 @@
 .ship-picker-empty{padding:18px;text-align:center;color:#718899}
 .ship-picker-footer{padding:8px 14px;border-top:1px solid #e4edf3;font-size:12px;color:#718899}
 .fleetship .ship-override-note{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ship-equipment{grid-column:1/-1;min-width:0;color:#335b76}
+.ship-equipment summary{cursor:pointer;padding:6px 0;font-size:12px}
+.equipment-slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:9px;margin:4px 0 8px}
+.equipment-slot{display:flex;gap:8px;align-items:end;min-width:0}
+.equipment-slot label:first-child{flex:1;min-width:0}
+.equipment-slot label:last-child:not(:first-child){width:64px;flex-shrink:0}
 @media(max-width:790px),(hover:none) and (pointer:coarse){.ship-picker-trigger{font-size:16px;min-height:40px}.ship-picker-dialog{width:calc(100% - 20px)}}
 .ship-stage-filters{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;border:0;margin:0;padding:2px 0 0;min-width:0}
 .ship-stage-filters legend{font-size:12px;color:#597285;margin-bottom:4px;padding:0}
@@ -247,7 +253,7 @@ const SHIP_MASTER_SOURCE=MASTER.source;
 const SHIP_MASTER_SHA=MASTER.sourceSha;
 const SHIP_TYPES=MASTER.types;
 const SHIP_MASTER_ROWS=MASTER.ships;
-const makeShipMap=rows=>new Map(rows.map(([id,name,stype,fuel,ammo])=>[String(id),{id,name,stype,fuel,ammo,kinu:id===487}]));
+const makeShipMap=rows=>new Map(rows.map(([id,name,stype,fuel,ammo,,slots])=>[String(id),{id,name,stype,fuel,ammo,slots,kinu:id===487}]));
 const SHIP_MASTER=makeShipMap(SHIP_MASTER_ROWS);
 const LEGACY_SHIPS=makeShipMap(root.KC_LEGACY_SHIPS);
 const EQUIPMENT_MASTER=new Map(MASTER.equipment.map(([id,name,type])=>[String(id),{id,name,type}]));
@@ -291,18 +297,47 @@ const zero=()=>Object.fromEntries(KEYS.map(k=>[k,0]));
 const add=(a,b,factor=1)=>{for(const k of KEYS) a[k]=(a[k]||0)+(b[k]||0)*factor;return a};
 const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,Number.isFinite(Number(n))?Number(n):lo));
 const EQUIPMENT=root.KC_EQUIPMENT_RULES.equipment;
+const DRUM_SUCCESS=root.KC_EQUIPMENT_RULES.drumSuccess;
 const DRUM_GREAT=root.KC_EQUIPMENT_RULES.drumGreat;
 const SPECIAL_PROB_IDS=new Set(root.KC_EQUIPMENT_RULES.specialProbIds);
+function shipEquipmentSlots(ship){
+ const slots=new Map();
+ for(const item of ship.items||[]){if(item?.id&&item.slot)slots.set(item.slot,item);}
+ // Older saves retained equipment order but did not retain empty or expansion slots.
+ let next=1;
+ for(const item of ship.items||[]){
+  if(!item?.id||item.slot)continue;
+  while(slots.has('i'+next))next++;
+  slots.set('i'+next++,item);
+ }
+ return slots;
+}
+function drumRequirementWarning(fleet,expId){
+ const requirement=DRUM_SUCCESS[expId];
+ if(!fleet||!requirement)return '';
+ const [ships,drums]=requirement;
+ const totals=equipmentTotals(fleet);
+ if(totals.drumShips>=ships&&totals.slottedDrums>=drums)return '';
+ return 'ドラム缶の成功条件：'+ships+'隻以上に計'+drums+'個必要（装備枠では'+totals.drumShips+'隻・'+totals.slottedDrums+'個）。';
+}
 function equipmentTotals(fleet){
  const eq=[];
- for(const ship of fleet?.ships||[]) for(const item of ship.items||[]) eq.push(item);
+ let slottedDrums=0,drumShips=0;
+ for(const ship of fleet?.ships||[]){
+  let equipped=0;
+  for(const item of ship.items||[]){
+   if(!item?.id)continue;
+   eq.push(item);
+   if(Number(item.id)===75)equipped++;
+  }
+  slottedDrums+=equipped;
+  if(equipped)drumShips++;
+ }
  const ext=fleet?.extraEquipment||{};
  for (const [key,id] of [['daihatsu',68],['tokudai',193],['tank',166],['katsu',167],['armed',409],['drum',75]]) {
    for(let i=0;i<clamp(ext[key]||0,0,30);i++)eq.push({id,rf:clamp(ext.star||0,0,10),fromManual:true});
  }
  let base=0,regular=0,special=0,drum=0,stars=0,starCount=0,unknown=[];
- const shipDrums=new Set();
- for(const ship of fleet?.ships||[]){if((ship.items||[]).some(item=>Number(item.id)===75))shipDrums.add(ship.id||ship.name)}
  for(const item of eq){const e=EQUIPMENT[Number(item.id)];if(!e){if(item.id)unknown.push(item.id);continue;}
    if(e.drum){drum++;continue;}base+=e.base||0;if(e.regular)regular++;if(e.special)special++;
    stars+=clamp(item.rf||0,0,10);starCount++;
@@ -313,7 +348,7 @@ function equipmentTotals(fleet){
  const averageStars=starCount?stars/starCount:0;
  const bonusStar=base*.01*averageStars;
  const bonusSpecial=special<3?.02*special:special===3?[.05,.05,.052,.054,.054][Math.min(regular,4)]:[.054,.056,.058,.059,.06][Math.min(regular,4)];
- return {base,bonusStar,bonusSpecial,percent:(base+bonusStar+bonusSpecial)*100,drum,drumShips:shipDrums.size,regular,special,unknown};
+ return {base,bonusStar,bonusSpecial,percent:(base+bonusStar+bonusSpecial)*100,drum,drumShips,slottedDrums,regular,special,unknown};
 }
 function getProb(row,fleet,commonPercent,exp){
  if(row.probMode==='manual')return {value:clamp(row.greatPct,0,100)/100,description:'個別指定'};
@@ -674,7 +709,7 @@ function scheduleAudit(preset,expeditions){
  return {runs,missing,hard,soft,placed:runs.length-missing,complete:!missing&&!hard.length,dayStart};
 }
 
-root.ExpCalc={SHIP_MASTER_SOURCE,SHIP_MASTER_SHA,SHIP_TYPES,SHIP_MASTER_ROWS,shipMaster,equipmentMaster,shipField,setShipOverride,applyShipMaster,hydrateShipMaster,minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,departureClock,departureDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
+root.ExpCalc={SHIP_MASTER_SOURCE,SHIP_MASTER_SHA,SHIP_TYPES,SHIP_MASTER_ROWS,shipMaster,equipmentMaster,shipEquipmentSlots,drumRequirementWarning,shipField,setShipOverride,applyShipMaster,hydrateShipMaster,minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,departureClock,departureDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
 if(typeof module!=='undefined'&&module.exports)module.exports=root.ExpCalc;
 })(typeof window!=='undefined'?window:globalThis);
 
@@ -831,6 +866,7 @@ function renderRow(row,scope,pid){
  const fleet=fleetById(row.fleetId);const v=E.expeditionOutcome(row,exp,state.fleets,state.settings),active=ui.expandedRow===row.id;
  const attr=`data-scope="${scope}" data-pid="${esc(pid)}" data-rid="${esc(row.id)}"`;
  const warn=v.prob.warning?`<div class="warning">${esc(v.prob.warning)}</div>`:'';
+ const drumWarning=E.drumRequirementWarning(fleet,exp.id);
  const rateText=`大成功 ${fmt(v.prob.value*100,0)}%（${esc(v.prob.description)}）`;
  const benefit=`大発補正 +${fmt(v.bonus.percent,2)}%`;
  const cost=v.costKnown?`補給 燃${fmt(v.cost.fuel)} / 弾${fmt(v.cost.ammo)}`:'補給は未計算';
@@ -841,6 +877,7 @@ function renderRow(row,scope,pid){
  <div class="entry-actions">${button('expand-row',active?'閉じる':'補正・詳細','btn tiny',`data-rid="${esc(row.id)}"`)} ${button('remove-row','削除','btn tiny danger',attr)}</div></div>
  <div class="entry-sub"><span class="chip blue">所要 ${E.formatOccupation(exp.minutes)} / 回</span><span>占有 ${E.formatOccupation(exp.minutes*E.clamp(row.count,0,monthly?1:200))}</span><span>${rateText}</span><span>${benefit}</span><span>${cost}</span></div>
  <div class="entry-sub summaryline">${outcomeSummary(v,E.clamp(row.count,0,monthly?1:200))}</div>
+ ${drumWarning?`<div class="warning">${esc(drumWarning)}</div>`:''}
  ${active?`<div class="entry-advanced"><h3>獲得補正・大成功率</h3><div class="cols-form">
  ${selectField('大成功率の指定',[{value:'common',label:'共通確率'},{value:'manual',label:'個別指定'},{value:'fleet',label:'編成から推定'}],row.probMode,`data-change="row" data-field="probMode" ${attr}`)}
  ${numberField('個別大成功率 (%)',row.greatPct,`data-change="row" data-field="greatPct" min="0" max="100" step="1" ${attr} ${row.probMode!=='manual'?'disabled':''}`,'grow')}
@@ -850,7 +887,7 @@ function renderRow(row,scope,pid){
  ${selectField('補給計算',[{value:'fleet',label:'編成の基礎燃費から計算'},{value:'manual',label:'遠征1回の消費量を入力'}],row.costMode,`data-change="row" data-field="costMode" ${attr}`)}
  ${numberField('手動：燃料消費 / 回',row.costFuel,`data-change="row" data-field="costFuel" min="0" max="5000" step="1" ${attr} ${row.costMode!=='manual'?'disabled':''}`,'grow')}
  ${numberField('手動：弾薬消費 / 回',row.costAmmo,`data-change="row" data-field="costAmmo" min="0" max="5000" step="1" ${attr} ${row.costMode!=='manual'?'disabled':''}`,'grow')}
- </div><p class="note">この遠征の補給消費率：燃料${exp.consumptionPct.fuel}%・弾薬${exp.consumptionPct.ammo}%。編成に各艦の最大補給量（ケッコン前）を入力すると消費量を推算します。成功条件は検査していません。</p>
+ </div><p class="note">この遠征の補給消費率：燃料${exp.consumptionPct.fuel}%・弾薬${exp.consumptionPct.ammo}%。編成に各艦の最大補給量（ケッコン前）を入力すると消費量を推算します。</p>
  ${warn}<div class="mini-grid">${['fuel','ammo','steel','bauxite'].map((k,i)=>`<div class="mini-stat"><span class="smallhead">${['燃料','弾薬','鋼材','ボーキ'][i]}（1回）</span><strong>${fmt(v.earned[k])}</strong><div class="subtle">通常 ${fmt(v.detail[k].normal)} / 大成功 ${fmt(v.detail[k].great)}</div></div>`).join('')}</div></div>`:''}</div>`;
 }
 // Time accounting: sum of mission durations times departures, without scheduling.
@@ -988,6 +1025,7 @@ function renderScheduleEntry(p,s){
  const end=assigned?`→ ${E.clockString(absoluteStart+s.duration)}`:'未配置';
  const startDayNote=dayOffset>0?`<span class="chip amber">翌運用日 +${dayOffset}日 ${button('schedule-reset-offset','基本日に戻す','btn tiny',attr)}</span>`:(absoluteStart!==null&&absoluteStart>=1440?'<span class="chip blue">翌日の出発</span>':'');
  const issue=assigned?E.scheduleConflicts(s,scheduleRows(p),base):null;
+ const drumWarning=E.drumRequirementWarning(fleetById(row.fleetId),exp.id);
  return `<div class="schedule-entry ${issue?.hard.length?'schedule-conflict':''}">
  <div class="schedule-entry-fields">${expeditionPicker(exp.id,null,attr)}
  ${selectField('艦隊枠',[{value:'',label:'未割当'},{value:'2',label:'第2艦隊'},{value:'3',label:'第3艦隊'},{value:'4',label:'第4艦隊'}],s.slot||'',`data-change="schedule" data-field="slot" ${attr}`,'medium')}
@@ -996,7 +1034,7 @@ function renderScheduleEntry(p,s){
  ${button('schedule-duplicate','遠征複製','btn tiny schedule-duplicate',attr)}
  ${button('schedule-remove','削除','btn tiny danger schedule-remove',attr)}
  </div>
- <div class="schedule-entry-note"><span>${esc(expeditionDuration(s.duration))} / 回</span>${startDayNote}<span class="${assigned?'scheduled':'unplaced'}">${esc(end)}</span>${issue?.hard.length?`<span class="warning">要確認：${esc(issue.hard.join(' '))}</span>`:''}</div>
+ <div class="schedule-entry-note"><span>${esc(expeditionDuration(s.duration))} / 回</span>${startDayNote}<span class="${assigned?'scheduled':'unplaced'}">${esc(end)}</span>${issue?.hard.length?`<span class="warning">要確認：${esc(issue.hard.join(' '))}</span>`:''}${drumWarning?`<span class="warning">${esc(drumWarning)}</span>`:''}</div>
  </div>`;
 }
 function renderScheduler(){
@@ -1184,6 +1222,32 @@ function chooseShip(ship,id){
  if(String(ship.shipId)!==String(id)){ship.shipId=String(id);E.applyShipMaster(ship,true);}
  return true;
 }
+const slotEquipmentOptions=[{value:'',label:'空欄'},...Object.entries(E.EQUIPMENT).map(([id,rule])=>({
+ value:id,label:E.equipmentMaster(id)?.name||rule.name
+}))];
+function renderShipEquipment(ship,fleetId,index){
+ const slots=E.shipEquipmentSlots(ship);
+ const count=E.shipMaster(ship.shipId)?.slots;
+ const regularSlots=Array.from({length:count??0},(_,i)=>'i'+(i+1));
+ const slotKeys=[...new Set([...regularSlots,...slots.keys()])];
+ const id=esc(fleetId+'-'+(ship.id??index));
+ const attrs=`data-fid="${esc(fleetId)}" data-index="${index}"`;
+ return `<details class="ship-equipment" data-ship-equipment="${id}"><summary>装備${slots.size?`（${slots.size}件）`:''}</summary>
+ ${count===undefined?'<p class="note">艦娘を選ぶと通常装備枠が表示されます。</p>':count===0?'<p class="note">通常装備枠なし</p>':''}
+ <div class="equipment-slots">${slotKeys.map(slot=>{
+  const item=slots.get(slot),rule=item&&E.EQUIPMENT[item.id];
+  const name=item&&(E.equipmentMaster(item.id)?.name||rule?.name||'装備ID '+item.id);
+  const label=slot==='ix'?'補強増設':'装備枠 '+slot.slice(1);
+  const current={value:item?.id,label:name+(item?.rf?' ★'+item.rf:'')};
+  if(slot==='ix')return `<div class="field"><span class="flabel">${label}</span><span>${esc(current.label)}</span></div>`;
+  const choices=regularSlots.includes(slot)?slotEquipmentOptions:[slotEquipmentOptions[0]];
+  const available=item&&!choices.some(x=>String(x.value)===String(item.id))?[...choices,current]:choices;
+  const slotAttrs=`${attrs} data-slot="${esc(slot)}"`;
+  return `<div class="equipment-slot"><label class="field"><span class="flabel">${label}</span>
+  <select data-change="ship-equipment" ${slotAttrs}>${options(available,item?.id??'')}</select></label>
+  ${rule&&!rule.drum&&regularSlots.includes(slot)?`<label class="field"><span class="flabel">改修★</span><input type="number" min="0" max="10" step="1" value="${esc(item.rf||0)}" data-change="ship-equipment-star" ${slotAttrs}></label>`:''}</div>`;
+ }).join('')}</div></details>`;
+}
 function renderFleet(){
  const f=fleetById(ui.selectedFleet)||state.fleets[0];if(!f)return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成が未割当でも獲得量は計算できます。登録すると大成功率・大発補正・補給費を計算できます。</p></div>${button('add-fleet','+ 編成を作成','btn primary')}</div><div class="empty">まだ編成がありません。手動で作るか、デッキビルダー形式をインポートできます。</div>${renderImport()}</section>`;
  const b=E.equipmentTotals(f);
@@ -1199,12 +1263,13 @@ function renderFleet(){
  <label class="check-field"><input type="checkbox" data-change="ship-check" data-fid="${esc(f.id)}" data-index="${i}" data-field="kira" ${s.kira?'checked':''}> キラ</label>
  ${button('remove-ship','×','btn tiny danger',`data-fid="${esc(f.id)}" data-index="${i}"`)}
  ${E.shipMaster(s.shipId)&&Object.keys(s.overrides||{}).length?`<div class="ship-override-note"><span class="note">手動上書きあり</span>${button('ship-reset-master','マスタ値に戻す','btn tiny',`data-fid="${esc(f.id)}" data-index="${i}"`)}</div>`:s.shipId&&!E.shipMaster(s.shipId)?'<div class="ship-override-note note">マスタ未登録の艦娘です。燃料・弾薬は手動設定できます。</div>':''}
- ${(s.items||[]).length?`<div class="subtle" style="grid-column:1/-1">読込装備：${(s.items||[]).map(x=>{const e=E.equipmentMaster(x.id)||E.EQUIPMENT[Number(x.id)];return esc((e?e.name:'装備ID '+x.id)+(x.rf?' ★'+x.rf:''))}).join(' / ')}</div>`:''}</div>`).join('')}
+ ${renderShipEquipment(s,f.id,i)}</div>`).join('')}
  <div class="row-wrap" style="margin-top:12px">${button('add-ship','+ 艦娘を追加','btn')}</div>${shipPickerDialog()}
- </section><section class="panel section"><div class="sectionhead"><div><h2>輸送装備（補正の自動計算）</h2><p>インポート済み装備に加え、手動登録分を加算できます。</p></div><span class="chip green">現在 +${fmt(b.percent,2)}%</span></div>
+ </section><section class="panel section"><div class="sectionhead"><div><h2>輸送装備</h2><p>ドラム缶 ${b.drum}個 ／ 装備した艦娘 ${b.drumShips}隻</p></div><span class="chip green">大発補正 +${fmt(b.percent,2)}%</span></div>
+ ${Object.values(f.extraEquipment||{}).some(value=>Number(value)>0)?`<details data-ship-equipment="legacy-${esc(f.id)}"><summary>旧設定の手動加算</summary>
+ <p class="note">以下の個数は各艦の装備に加算されます。装備枠へ移した分はここで減らしてください。</p>
  <div class="mini-grid">${[['daihatsu','大発（★指定共通）'],['tokudai','特大発'],['tank','陸戦隊'],['katsu','特二式内火艇'],['armed','武装大発'],['drum','ドラム缶'],['star','手動装備の★平均']].map(([key,label])=>numberField(label,f.extraEquipment?.[key]||0,`data-change="equipment" data-fid="${esc(f.id)}" data-field="${key}" min="0" max="${key==='star'?10:30}" step="1"`,'grow')).join('')}</div>
- <p class="note">特大発の別枠上限、大発系の基本20%上限、改修補正、鬼怒改二固有+5%に対応しています。一部の特殊大発は装備IDが未登録のため、必要に応じて遠征行ごとの「手動補正率」を利用してください。</p>
- <div class="notice">読み込んだ装備のうち、補正計算に使用するID：68 大発 / 193 特大発 / 166 陸戦隊 / 167 内火艇 / 408 AB艇 / 409 武装大発 / 75 ドラム缶。</div></section>${renderImport()}</div>`;
+ </details>`:''}</section>${renderImport()}</div>`;
 }
 function renderImport(){return `<section class="panel section"><div class="sectionhead"><div><h2>制空権シミュレータからインポート</h2><p>「共有」→デッキビルダー形式のJSONをコピーして貼り付けます。</p></div></div><textarea id="deck-text" placeholder='{"version":4,"f1":{"s1":{"id":"487","lv":99,"items":{"i1":{"id":68,"rf":10}}}}}'></textarea><div class="row-wrap" style="margin-top:10px">${button('import-deck','デッキビルダーJSONを読み込む','btn primary')}</div><p class="note">f1〜f4の各艦隊を別々の編成として登録します。艦娘ID・Lv・装備ID・改修値を取り込みます。艦娘マスタに登録されているIDは艦名・艦種・基礎補給量を自動設定し、鬼怒改二の固有補正を自動判定します。未知IDは手動設定、キラ状態は手動入力です。ネットへの送信はありません。</p><p class="note">艦娘マスタ：${E.SHIP_MASTER_ROWS.length}件。出典：<a href="${E.SHIP_MASTER_SOURCE}" target="_blank" rel="noopener">kcwiki/kancolle-data（api_start2）</a> ／ データ識別子 ${E.SHIP_MASTER_SHA.slice(0,12)}。</p><div id="import-status">${ui.importNotice?`<div class="notice">${esc(ui.importNotice)}</div>`:''}</div></section>`}
 function renderCompare(){
@@ -1229,6 +1294,7 @@ function renderCompare(){
 }
 function render(){
  const main=one('#app');
+ const openEquipment=new Set([...main.querySelectorAll('details[data-ship-equipment][open]')].map(x=>x.dataset.shipEquipment));
  const plan=E.computePlan(state,EXP);
  state.simpleBlocks??=[newSimpleBlock()];
  main.innerHTML=`<div class="top"><div class="container"><div class="toprow"><div><div class="brand"><div class="mark">≋</div><div><div class="eyebrow">KAN-COLLE / EXPEDITION ANALYTICS</div><h1>遠征収支シミュレータ <span class="tag">v1.8</span></h1></div></div><p class="subtitle">いつもの遠征運用を、週・月・年の資源収支に。</p></div><div class="topactions">${button('save-snapshot','条件を一時保存','btn light')}${button('export-json','JSON保存','btn light')}</div></div></div></div>
@@ -1236,6 +1302,7 @@ function render(){
  ${ui.tab==='simple'?'':renderOverview()}
  <div class="content">${ui.tab==='simple'?renderSimple():ui.tab==='plan'?renderPlan():ui.tab==='scheduler'?renderScheduler():ui.tab==='mapping'?renderFleetMapping():ui.tab==='fleet'?renderFleet():renderCompare()}</div>
  <footer class="footer footnotes">非公式ファンツール。艦これの運営元・攻略Wikiとは無関係です。計算は成功率100%を前提とする期待値で、キラ維持の手間・交戦遠征の修理費・ランダム獲得アイテムは算出していません。曜日・祝日方式は実際の暦を使用し、従来方式は365÷7÷12週換算です。<br>遠征データ・消費率：<a target="_blank" rel="noopener noreferrer" href="https://wikiwiki.jp/kancolle/%E9%81%A0%E5%BE%81">艦これ攻略Wiki（遠征）</a> / <a target="_blank" rel="noopener noreferrer" href="https://kouryakulab.com/ja/games/kancolle/expedition-requirements/">遠征一覧</a>。大発補正：<a href="https://wikiwiki.jp/kancolle/%E7%89%B9%E5%A4%A7%E7%99%BA%E5%8B%95%E8%89%87" rel="noopener noreferrer" target="_blank">特大発動艇</a>。</footer></main>`;
+ for(const details of main.querySelectorAll('details[data-ship-equipment]'))details.open=openEquipment.has(details.dataset.shipEquipment);
 }
 function findRow(el){const ds=el.dataset;const arr=ds.scope==='monthly'?state.monthlyRows:presetById(ds.pid)?.rows;return {arr,row:arr?.find(x=>x.id===ds.rid)};}
 function removeFleetRefs(id){for(const p of state.presets)for(const row of p.rows)if(row.fleetId===id)row.fleetId='';for(const row of state.monthlyRows)if(row.fleetId===id)row.fleetId='';}
@@ -1352,6 +1419,22 @@ function handleClick(e){
  });
 }
 function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)return;
+ if(type==='ship-equipment'||type==='ship-equipment-star'){
+  const ship=fleetById(d.fid)?.ships[Number(d.index)];
+  if(!ship)return;
+  const slots=E.shipEquipmentSlots(ship),item=slots.get(d.slot);
+  if(type==='ship-equipment-star'){
+   if(!item||!E.EQUIPMENT[item.id]||E.EQUIPMENT[item.id].drum)return;
+   slots.set(d.slot,{...item,rf:Math.round(E.clamp(t.value,0,10))});
+  }else if(!t.value)slots.delete(d.slot);
+  else if(Object.hasOwn(E.EQUIPMENT,t.value))slots.set(d.slot,{id:Number(t.value),rf:0});
+  else return;
+  update(()=>{ship.items=[...slots].map(([slot,equipment])=>({...equipment,slot}));});
+  const control=[...document.querySelectorAll('details.ship-equipment [data-change]')].find(x=>
+   x.dataset.fid===d.fid&&x.dataset.index===d.index&&x.dataset.slot===d.slot&&x.dataset.change===type);
+  control?.focus({preventScroll:true});
+  return;
+ }
  if(type==='simple-block'||type==='simple-row'){update(()=>{const block=simpleBlocks().find(x=>x.id===d.bid),obj=type==='simple-block'?block:block?.rows.find(x=>x.id===d.rid);if(obj)obj[d.field]=t.type==='checkbox'?t.checked:d.field==='count'?Math.round(E.clamp(t.value,0,200)):d.field==='multiplier'?E.clamp(t.value,0,100000):t.value;});return;}
  if(type==='operation-extra'){update(()=>{const x=state.operationRules?.extraExceptions?.[Number(d.index)];if(x)x[d.field]=d.field==='count'?Math.round(E.clamp(t.value,0,31)):t.value;});return;}
  if(type==='operation-rule'||type==='operation-weekday'){update(()=>{const r=state.operationRules??=E.operationRules(state);if(type==='operation-weekday'){r.weekdays??={};if(t.value==='auto')delete r.weekdays[d.index];else r.weekdays[d.index]=t.value;}else r[d.field]=t.type==='checkbox'?t.checked:d.field==='maintenanceCount'?Math.round(E.clamp(t.value,0,31)):t.value|| (d.field==='reference'?r.reference:'');});return;}
@@ -1408,7 +1491,9 @@ function parseDeck(raw){
   let ships=[];
   for(let si=1;si<=7;si++){
    const s=group[`s${si}`];if(!s||!s.id||String(s.id)==='0')continue;
-   const items=Object.values(s.items||{}).filter(x=>x&&x.id&&Number(x.id)>0).map(x=>({id:Number(x.id),rf:Number(x.rf||0)}));
+   const items=Object.entries(s.items||{}).filter(([slot,x])=>
+    /^(i[1-9]\d*|ix)$/.test(slot)&&Number(x?.id)>0
+   ).map(([slot,x])=>({id:Number(x.id),rf:Number(x.rf||0),slot}));
    const level=Number(s.lv||1);
    const ship={id:uid(),shipId:String(s.id),overrides:{},level,married:level>=100,kira:false,items};ships.push(ship);
   }
