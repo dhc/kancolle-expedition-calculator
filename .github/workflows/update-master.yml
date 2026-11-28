@@ -1,0 +1,56 @@
+name: Update game master
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: game-master-update
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Fetch, validate and test
+        run: |
+          node scripts/update-master.cjs
+          node scripts/update-master.cjs --check
+          node scripts/test-master.cjs
+      - name: Open review PR if master changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- data/game-master.json data/game-master.js data/manifest.json; then
+            echo "No relevant changes"
+            exit 0
+          fi
+          open_prs=$(gh pr list --base develop --state open --limit 100 --json headRefName --jq '[.[] | select(.headRefName | startswith("automation/master-update-"))] | length')
+          if [ "$open_prs" -ne 0 ]; then
+            echo "A master update PR is already open; review it first."
+            exit 0
+          fi
+          branch="automation/master-update-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/game-master.json data/game-master.js data/manifest.json
+          git commit -m 'Update KanColle game master'
+          git push origin "$branch"
+          {
+            printf '%s\n' '公開APIマスタの自動更新です。独自調査データは変更していません。'
+            printf '\n%s\n' '## データ差分（ID）' '~~~json'
+            cat master-diff.json
+            printf '%s\n' '~~~' '抽出検証・整合性テスト済み。developへのマージ後、通常の公開手順でmainへ反映します。'
+          } > /tmp/master-pr-body.md
+          gh pr create --base develop --head "$branch" --title '艦これマスタデータ更新' --body-file /tmp/master-pr-body.md
