@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "source": "https://raw.githubusercontent.com/kcwiki/kancolle-data/master/api/api_start2.json",
+  "sourceSha": "f0bb7d936f2293aac50e14c9db460448b9a3bb9f",
+  "counts": {
+    "ships": 870,
+    "types": 22,
+    "equipment": 742,
+    "expeditions": 63
+  }
+}
