@@ -49,3 +49,32 @@ assert.throws(()=>lib.guard(master,removed,w.KC_EXPEDITION_RULES));
 assert.throws(()=>lib.extract({},master.sourceSha));
 assert.equal(E.equipmentMaster(1).id,1);
 console.log('Master consistency, runtime resolution, migration, manual overrides, unknown IDs, and update guards: OK');
+
+const stage=id=>master.ships.find(x=>x[0]===id)?.[5];
+// Stable examples from the current snapshot; avoid hardcoding stages that can
+// legitimately change when a future remodel is released.
+assert.ok(master.ships.every(x=>['base','middle','final','standalone'].includes(x[5])));
+const pickerSource=html.slice(html.indexOf('const SHIP_STAGES='),html.indexOf('function shipPickerTrigger('));
+const makePicker=E=>new Function('E','shipTypeLabel','normalizeShipQuery',pickerSource+';return {matchingShips,shipPickerInitialStages}')(E,id=>E.SHIP_TYPES[id],v=>String(v).normalize('NFKC').trim().toLowerCase());
+const picker=makePicker(E);
+assert.equal(picker.matchingShips('','all',[]).length,0);
+assert.equal(picker.matchingShips('','all',['base','middle','final']).length,master.ships.length);
+assert.equal(picker.matchingShips('','all').length,master.ships.filter(x=>['final','standalone'].includes(x[5])).length);
+for(const [id,name,type,fuel,ammo,stage] of master.ships){
+ const initial=picker.shipPickerInitialStages(id);
+ assert.ok(initial.includes('final'));
+ assert.ok(picker.matchingShips(name,E.SHIP_TYPES[type],initial).some(x=>x[0]===id));
+}
+const synthetic=[{api_id:1,api_aftershipid:'2'},{api_id:2,api_aftershipid:'3'},{api_id:3,api_aftershipid:'2'},{api_id:4,api_aftershipid:'0'}];
+const cycle=lib.remodelStages(synthetic,[]);
+assert.equal(cycle.get(1),'base');assert.equal(cycle.get(2),'final');assert.equal(cycle.get(3),'final');assert.equal(cycle.get(4),'standalone');
+assert.equal(lib.remodelStages(synthetic,[{api_current_ship_id:3,api_id:4}]).get(2),'middle');
+const syntheticPicker=makePicker({SHIP_TYPES:{2:'駆逐艦'},SHIP_MASTER_ROWS:[[1,'霞',2,15,15,'base'],[2,'霞改',2,15,20,'middle'],[3,'霞改二',2,15,20,'final'],[4,'霞改二乙',2,15,20,'final'],[5,'新艦',2,15,15,'standalone']]});
+assert.equal(syntheticPicker.matchingShips('霞','駆逐艦').length,2);
+assert.equal(syntheticPicker.matchingShips('霞','駆逐艦',['base','middle','final']).length,4);
+assert.deepEqual(syntheticPicker.shipPickerInitialStages(2),['final','middle']);
+assert.deepEqual(syntheticPicker.shipPickerInitialStages(1),['final','base']);
+assert.deepEqual(syntheticPicker.shipPickerInitialStages(3),['final']);
+assert.ok(syntheticPicker.matchingShips('新艦','all',['base']).length===1);
+assert.ok(syntheticPicker.matchingShips('新艦','all',['final']).length===1);
+console.log('Remodel stages, conversion cycles, filters, imported selection: OK');
