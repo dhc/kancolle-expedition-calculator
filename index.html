@@ -200,7 +200,7 @@
 .ship-picker-head{padding:12px 14px 10px;border-bottom:1px solid #e4edf3}
 .ship-picker-head .row-between{align-items:center;gap:8px}
 .ship-picker-filters{display:grid;gap:8px;margin-top:10px}
-.ship-picker-filters input{background:white;border:1px solid #d3e0e8;border-radius:8px;padding:9px;width:100%;min-width:0;font-size:16px}
+.ship-picker-filters input[type=search]{background:white;border:1px solid #d3e0e8;border-radius:8px;padding:9px;width:100%;min-width:0;font-size:16px}
 .ship-picker-filters select{font-size:16px}
 .ship-picker-columns{display:flex;align-items:center;justify-content:space-between;padding:7px 14px;font-size:12px;color:#597285;background:#f3f7fa;gap:8px}
 .ship-picker-results{min-height:0;overflow-y:auto;overscroll-behavior:contain;max-height:440px;-webkit-overflow-scrolling:touch}
@@ -220,11 +220,11 @@
 .equipment-slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:9px;margin:4px 0 8px}
 .equipment-slot{display:flex;gap:8px;align-items:end;min-width:0}
 .equipment-slot label:first-child{flex:1;min-width:0}
-.equipment-slot label:last-child:not(:first-child){width:64px;flex-shrink:0}
+.equipment-slot label:last-child:not(:first-child){width:76px;flex-shrink:0}
 @media(max-width:790px),(hover:none) and (pointer:coarse){.ship-picker-trigger{font-size:16px;min-height:40px}.ship-picker-dialog{width:calc(100% - 20px)}}
 .ship-stage-filters{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;border:0;margin:0;padding:2px 0 0;min-width:0}
 .ship-stage-filters legend{font-size:12px;color:#597285;margin-bottom:4px;padding:0}
-.ship-stage-filters .check-field{padding:4px 0;font-size:13px;white-space:nowrap;cursor:pointer}
+.ship-picker-filters .check-field{padding:4px 0;font-size:13px;white-space:nowrap;cursor:pointer}
 </style>
 </head>
 <body>
@@ -253,7 +253,9 @@ const SHIP_MASTER_SOURCE=MASTER.source;
 const SHIP_MASTER_SHA=MASTER.sourceSha;
 const SHIP_TYPES=MASTER.types;
 const SHIP_MASTER_ROWS=MASTER.ships;
-const makeShipMap=rows=>new Map(rows.map(([id,name,stype,fuel,ammo,,slots])=>[String(id),{id,name,stype,fuel,ammo,slots,kinu:id===487}]));
+const makeShipMap=rows=>new Map(rows.map(([id,name,stype,fuel,ammo,,slots,canCarryLandingCraft])=>
+ [String(id),{id,name,stype,fuel,ammo,slots,canCarryLandingCraft,kinu:id===487}]
+));
 const SHIP_MASTER=makeShipMap(SHIP_MASTER_ROWS);
 const LEGACY_SHIPS=makeShipMap(root.KC_LEGACY_SHIPS);
 const EQUIPMENT_MASTER=new Map(MASTER.equipment.map(([id,name,type])=>[String(id),{id,name,type}]));
@@ -312,6 +314,15 @@ function shipEquipmentSlots(ship){
  }
  return slots;
 }
+function equipmentSlotNumber(slot){
+ return /^i[1-9]\d?$/.test(slot)?Number(slot.slice(1)):0;
+}
+function equipmentSlotCount(ship,slots=shipEquipmentSlots(ship)){
+ const known=shipMaster(ship.shipId)?.slots;
+ if(known!==undefined)return known;
+ // For unknown IDs, keep the regular positions inferred from the import even after removal.
+ return Math.max(Math.floor(clamp(ship.slotCount,0,99)),...[...slots.keys()].map(equipmentSlotNumber));
+}
 function drumRequirementWarning(fleet,expId){
  const requirement=DRUM_SUCCESS[expId];
  if(!fleet||!requirement)return '';
@@ -324,9 +335,10 @@ function equipmentTotals(fleet){
  const eq=[];
  let slottedDrums=0,drumShips=0;
  for(const ship of fleet?.ships||[]){
+  const slots=shipEquipmentSlots(ship),count=equipmentSlotCount(ship,slots);
   let equipped=0;
-  for(const item of ship.items||[]){
-   if(!item?.id)continue;
+  for(const [slot,item] of slots){
+   if(slot!=='ix'&&!(equipmentSlotNumber(slot)>0&&equipmentSlotNumber(slot)<=count))continue;
    eq.push(item);
    if(Number(item.id)===75)equipped++;
   }
@@ -709,7 +721,7 @@ function scheduleAudit(preset,expeditions){
  return {runs,missing,hard,soft,placed:runs.length-missing,complete:!missing&&!hard.length,dayStart};
 }
 
-root.ExpCalc={SHIP_MASTER_SOURCE,SHIP_MASTER_SHA,SHIP_TYPES,SHIP_MASTER_ROWS,shipMaster,equipmentMaster,shipEquipmentSlots,drumRequirementWarning,shipField,setShipOverride,applyShipMaster,hydrateShipMaster,minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,departureClock,departureDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
+root.ExpCalc={SHIP_MASTER_SOURCE,SHIP_MASTER_SHA,SHIP_TYPES,SHIP_MASTER_ROWS,shipMaster,equipmentMaster,shipEquipmentSlots,equipmentSlotCount,drumRequirementWarning,shipField,setShipOverride,applyShipMaster,hydrateShipMaster,minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,departureClock,departureDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
 if(typeof module!=='undefined'&&module.exports)module.exports=root.ExpCalc;
 })(typeof window!=='undefined'?window:globalThis);
 
@@ -1180,9 +1192,12 @@ function shipPickerInitialStages(id){
  const row=E.SHIP_MASTER_ROWS.find(x=>String(x[0])===String(id)),stage=row?.[5];
  return ['final',...(['base','middle'].includes(stage)?[stage]:[])];
 }
-function matchingShips(query,type,stages=['final']){
+function matchingShips(query,type,stages=['final'],landingCraftOnly=false){
  const q=normalizeShipQuery(query);
- return E.SHIP_MASTER_ROWS.filter(([id,name,stype,fuel,ammo,stage])=>shipStageMatches(stage,stages)&&(type==='all'||shipTypeLabel(stype)===type)&&normalizeShipQuery(name).includes(q));
+ return E.SHIP_MASTER_ROWS.filter(([id,name,stype,fuel,ammo,stage,slots,canCarryLandingCraft])=>
+  shipStageMatches(stage,stages)&&(type==='all'||shipTypeLabel(stype)===type)&&
+  (!landingCraftOnly||canCarryLandingCraft)&&normalizeShipQuery(name).includes(q)
+ );
 }
 function shipPickerTrigger(ship,fleetId,index){
  const name=ship.shipId||Object.keys(ship.overrides||{}).length?E.shipField(ship,'name'):'艦娘を選択';
@@ -1190,7 +1205,7 @@ function shipPickerTrigger(ship,fleetId,index){
 }
 function shipPickerDialog(){
  const types=[...new Set(Object.values(E.SHIP_TYPES))];
- return `<dialog id="ship-picker-dialog" class="ship-picker-dialog" aria-labelledby="ship-picker-title"><div class="ship-picker-head"><div class="row-between"><h2 id="ship-picker-title">艦娘を選択</h2>${button('ship-picker-close','×','btn tiny','aria-label="閉じる" autofocus')}</div><div class="ship-picker-filters"><input type="search" id="ship-picker-query" placeholder="艦娘名で検索" aria-label="艦娘名で検索" autocomplete="off"><select id="ship-picker-type" aria-label="艦種フィルタ">${options([{value:'all',label:'すべての艦種'},...types.map(name=>({value:name,label:name}))],'all')}</select><fieldset class="ship-stage-filters"><legend>改造段階</legend>${SHIP_STAGES.map(([key,label])=>`<label class="check-field"><input type="checkbox" data-ship-stage="${key}" ${key==='final'?'checked':''}> ${label}</label>`).join('')}</fieldset></div></div><div class="ship-picker-columns"><span>艦娘・艦種</span><span>燃料 ／ 弾薬　　</span></div><div class="ship-picker-results" id="ship-picker-results"></div><div class="ship-picker-footer" id="ship-picker-count" aria-live="polite"></div></dialog>`;
+ return `<dialog id="ship-picker-dialog" class="ship-picker-dialog" aria-labelledby="ship-picker-title"><div class="ship-picker-head"><div class="row-between"><h2 id="ship-picker-title">艦娘を選択</h2>${button('ship-picker-close','×','btn tiny','aria-label="閉じる" autofocus')}</div><div class="ship-picker-filters"><input type="search" id="ship-picker-query" placeholder="艦娘名で検索" aria-label="艦娘名で検索" autocomplete="off"><select id="ship-picker-type" aria-label="艦種フィルタ">${options([{value:'all',label:'すべての艦種'},...types.map(name=>({value:name,label:name}))],'all')}</select><label class="check-field"><input type="checkbox" id="ship-picker-landing-craft"> 大発系を搭載できる艦娘のみ</label><fieldset class="ship-stage-filters"><legend>改造段階</legend>${SHIP_STAGES.map(([key,label])=>`<label class="check-field"><input type="checkbox" data-ship-stage="${key}" ${key==='final'?'checked':''}> ${label}</label>`).join('')}</fieldset></div></div><div class="ship-picker-columns"><span>艦娘・艦種</span><span>燃料 ／ 弾薬　　</span></div><div class="ship-picker-results" id="ship-picker-results"></div><div class="ship-picker-footer" id="ship-picker-count" aria-live="polite"></div></dialog>`;
 }
 function shipChoice(row,selected){
  const [id,name,stype,fuel,ammo,stage]=row,active=String(id)===String(selected);
@@ -1198,7 +1213,7 @@ function shipChoice(row,selected){
 }
 function refreshShipPicker(dialog,scrollSelected=false){
  const stages=[...dialog.querySelectorAll('[data-ship-stage]:checked')].map(x=>x.dataset.shipStage);
- const rows=matchingShips(dialog.querySelector('#ship-picker-query').value,dialog.querySelector('#ship-picker-type').value,stages);
+ const rows=matchingShips(dialog.querySelector('#ship-picker-query').value,dialog.querySelector('#ship-picker-type').value,stages,dialog.querySelector('#ship-picker-landing-craft').checked);
  const ship=fleetById(dialog.dataset.fid)?.ships[Number(dialog.dataset.index)],selected=ship?.shipId;
  const results=dialog.querySelector('#ship-picker-results');
  results.innerHTML=rows.length?rows.map(row=>shipChoice(row,selected)).join(''):'<div class="ship-picker-empty">該当する艦娘がありません。</div>';
@@ -1212,6 +1227,7 @@ function openShipPicker(fid,index){
  dialog.dataset.fid=fid;dialog.dataset.index=String(index);
  dialog.querySelector('#ship-picker-query').value='';
  dialog.querySelector('#ship-picker-type').value='all';
+ dialog.querySelector('#ship-picker-landing-craft').checked=ui.landingCraftOnly===true;
  const stages=shipPickerInitialStages(ship.shipId);
  for(const input of dialog.querySelectorAll('[data-ship-stage]'))input.checked=stages.includes(input.dataset.shipStage);
  dialog.showModal();
@@ -1222,31 +1238,36 @@ function chooseShip(ship,id){
  if(String(ship.shipId)!==String(id)){ship.shipId=String(id);E.applyShipMaster(ship,true);}
  return true;
 }
-const slotEquipmentOptions=[{value:'',label:'空欄'},...Object.entries(E.EQUIPMENT).map(([id,rule])=>({
+const slotEquipmentOptions=[{value:'',label:'未搭載'},...Object.entries(E.EQUIPMENT).map(([id,rule])=>({
  value:id,label:E.equipmentMaster(id)?.name||rule.name
 }))];
+const starOptions=Array.from({length:11},(_,value)=>({value,label:value?'★'+value:'★0'}));
+function equipmentName(item){
+ return E.equipmentMaster(item.id)?.name||E.EQUIPMENT[item.id]?.name||'装備ID '+item.id;
+}
+function equipmentDescription(item){
+ return equipmentName(item)+(item.rf?' ★'+item.rf:'');
+}
 function renderShipEquipment(ship,fleetId,index){
- const slots=E.shipEquipmentSlots(ship);
- const count=E.shipMaster(ship.shipId)?.slots;
- const regularSlots=Array.from({length:count??0},(_,i)=>'i'+(i+1));
- const slotKeys=[...new Set([...regularSlots,...slots.keys()])];
+ const slots=E.shipEquipmentSlots(ship),count=E.equipmentSlotCount(ship,slots);
+ const regularSlots=Array.from({length:count},(_,i)=>'i'+(i+1));
+ const expansion=slots.get('ix');
+ const overflow=[...slots].filter(([slot])=>slot!=='ix'&&!regularSlots.includes(slot));
  const id=esc(fleetId+'-'+(ship.id??index));
  const attrs=`data-fid="${esc(fleetId)}" data-index="${index}"`;
- return `<details class="ship-equipment" data-ship-equipment="${id}"><summary>装備${slots.size?`（${slots.size}件）`:''}</summary>
- ${count===undefined?'<p class="note">艦娘を選ぶと通常装備枠が表示されます。</p>':count===0?'<p class="note">通常装備枠なし</p>':''}
- <div class="equipment-slots">${slotKeys.map(slot=>{
-  const item=slots.get(slot),rule=item&&E.EQUIPMENT[item.id];
-  const name=item&&(E.equipmentMaster(item.id)?.name||rule?.name||'装備ID '+item.id);
-  const label=slot==='ix'?'補強増設':'装備枠 '+slot.slice(1);
-  const current={value:item?.id,label:name+(item?.rf?' ★'+item.rf:'')};
-  if(slot==='ix')return `<div class="field"><span class="flabel">${label}</span><span>${esc(current.label)}</span></div>`;
-  const choices=regularSlots.includes(slot)?slotEquipmentOptions:[slotEquipmentOptions[0]];
-  const available=item&&!choices.some(x=>String(x.value)===String(item.id))?[...choices,current]:choices;
-  const slotAttrs=`${attrs} data-slot="${esc(slot)}"`;
+ return `<details class="ship-equipment" data-ship-equipment="${id}" ${count?'open':''}><summary>装備（${count}枠）</summary>
+ ${!count?(ship.shipId?'<p class="note">通常装備枠の登録なし</p>':'<p class="note">艦娘を選ぶと通常装備枠が表示されます。</p>'):''}
+ <div class="equipment-slots">${regularSlots.map((slot,i)=>{
+  const item=slots.get(slot),rule=item&&E.EQUIPMENT[item.id],label='装備枠 '+(i+1);
+  const available=item&&!rule?[...slotEquipmentOptions,{value:item.id,label:equipmentName(item)}]:slotEquipmentOptions;
+  const slotAttrs=`${attrs} data-slot="${slot}"`;
   return `<div class="equipment-slot"><label class="field"><span class="flabel">${label}</span>
   <select data-change="ship-equipment" ${slotAttrs}>${options(available,item?.id??'')}</select></label>
-  ${rule&&!rule.drum&&regularSlots.includes(slot)?`<label class="field"><span class="flabel">改修★</span><input type="number" min="0" max="10" step="1" value="${esc(item.rf||0)}" data-change="ship-equipment-star" ${slotAttrs}></label>`:''}</div>`;
- }).join('')}</div></details>`;
+  <label class="field"><span class="flabel">改修★</span><select aria-label="${label}の改修★" data-change="ship-equipment-star" ${slotAttrs} ${!rule||rule.drum?'disabled':''}>${options(starOptions,Math.round(E.clamp(item?.rf,0,10)))}</select></label></div>`;
+ }).join('')}</div>
+ ${expansion?`<p class="note">補強増設　${esc(equipmentDescription(expansion))}</p>`:''}
+ ${overflow.length?`<p class="note">現在の枠数を超える保存済み装備（集計対象外）　${overflow.map(([,item])=>esc(equipmentDescription(item))).join(' / ')}</p>`:''}
+ </details>`;
 }
 function renderFleet(){
  const f=fleetById(ui.selectedFleet)||state.fleets[0];if(!f)return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊編成</h2><p>編成が未割当でも獲得量は計算できます。登録すると大成功率・大発補正・補給費を計算できます。</p></div>${button('add-fleet','+ 編成を作成','btn primary')}</div><div class="empty">まだ編成がありません。手動で作るか、デッキビルダー形式をインポートできます。</div>${renderImport()}</section>`;
@@ -1294,7 +1315,7 @@ function renderCompare(){
 }
 function render(){
  const main=one('#app');
- const openEquipment=new Set([...main.querySelectorAll('details[data-ship-equipment][open]')].map(x=>x.dataset.shipEquipment));
+ const openEquipment=new Map([...main.querySelectorAll('details[data-ship-equipment]')].filter(x=>x.querySelector('.equipment-slot')||!x.classList.contains('ship-equipment')).map(x=>[x.dataset.shipEquipment,x.open]));
  const plan=E.computePlan(state,EXP);
  state.simpleBlocks??=[newSimpleBlock()];
  main.innerHTML=`<div class="top"><div class="container"><div class="toprow"><div><div class="brand"><div class="mark">≋</div><div><div class="eyebrow">KAN-COLLE / EXPEDITION ANALYTICS</div><h1>遠征収支シミュレータ <span class="tag">v1.8</span></h1></div></div><p class="subtitle">いつもの遠征運用を、週・月・年の資源収支に。</p></div><div class="topactions">${button('save-snapshot','条件を一時保存','btn light')}${button('export-json','JSON保存','btn light')}</div></div></div></div>
@@ -1302,7 +1323,9 @@ function render(){
  ${ui.tab==='simple'?'':renderOverview()}
  <div class="content">${ui.tab==='simple'?renderSimple():ui.tab==='plan'?renderPlan():ui.tab==='scheduler'?renderScheduler():ui.tab==='mapping'?renderFleetMapping():ui.tab==='fleet'?renderFleet():renderCompare()}</div>
  <footer class="footer footnotes">非公式ファンツール。艦これの運営元・攻略Wikiとは無関係です。計算は成功率100%を前提とする期待値で、キラ維持の手間・交戦遠征の修理費・ランダム獲得アイテムは算出していません。曜日・祝日方式は実際の暦を使用し、従来方式は365÷7÷12週換算です。<br>遠征データ・消費率：<a target="_blank" rel="noopener noreferrer" href="https://wikiwiki.jp/kancolle/%E9%81%A0%E5%BE%81">艦これ攻略Wiki（遠征）</a> / <a target="_blank" rel="noopener noreferrer" href="https://kouryakulab.com/ja/games/kancolle/expedition-requirements/">遠征一覧</a>。大発補正：<a href="https://wikiwiki.jp/kancolle/%E7%89%B9%E5%A4%A7%E7%99%BA%E5%8B%95%E8%89%87" rel="noopener noreferrer" target="_blank">特大発動艇</a>。</footer></main>`;
- for(const details of main.querySelectorAll('details[data-ship-equipment]'))details.open=openEquipment.has(details.dataset.shipEquipment);
+ for(const details of main.querySelectorAll('details[data-ship-equipment]')){
+  if(openEquipment.has(details.dataset.shipEquipment))details.open=openEquipment.get(details.dataset.shipEquipment);
+ }
 }
 function findRow(el){const ds=el.dataset;const arr=ds.scope==='monthly'?state.monthlyRows:presetById(ds.pid)?.rows;return {arr,row:arr?.find(x=>x.id===ds.rid)};}
 function removeFleetRefs(id){for(const p of state.presets)for(const row of p.rows)if(row.fleetId===id)row.fleetId='';for(const row of state.monthlyRows)if(row.fleetId===id)row.fleetId='';}
@@ -1422,14 +1445,18 @@ function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)ret
  if(type==='ship-equipment'||type==='ship-equipment-star'){
   const ship=fleetById(d.fid)?.ships[Number(d.index)];
   if(!ship)return;
-  const slots=E.shipEquipmentSlots(ship),item=slots.get(d.slot);
+  const slots=E.shipEquipmentSlots(ship),item=slots.get(d.slot),count=E.equipmentSlotCount(ship,slots);
+  if(!/^i[1-9]\d?$/.test(d.slot)||Number(d.slot.slice(1))>count)return;
   if(type==='ship-equipment-star'){
    if(!item||!E.EQUIPMENT[item.id]||E.EQUIPMENT[item.id].drum)return;
    slots.set(d.slot,{...item,rf:Math.round(E.clamp(t.value,0,10))});
   }else if(!t.value)slots.delete(d.slot);
   else if(Object.hasOwn(E.EQUIPMENT,t.value))slots.set(d.slot,{id:Number(t.value),rf:0});
   else return;
-  update(()=>{ship.items=[...slots].map(([slot,equipment])=>({...equipment,slot}));});
+  update(()=>{
+   if(!E.shipMaster(ship.shipId))ship.slotCount=count;
+   ship.items=[...slots].map(([slot,equipment])=>({...equipment,slot}));
+  });
   const control=[...document.querySelectorAll('details.ship-equipment [data-change]')].find(x=>
    x.dataset.fid===d.fid&&x.dataset.index===d.index&&x.dataset.slot===d.slot&&x.dataset.change===type);
   control?.focus({preventScroll:true});
@@ -1492,7 +1519,7 @@ function parseDeck(raw){
   for(let si=1;si<=7;si++){
    const s=group[`s${si}`];if(!s||!s.id||String(s.id)==='0')continue;
    const items=Object.entries(s.items||{}).filter(([slot,x])=>
-    /^(i[1-9]\d*|ix)$/.test(slot)&&Number(x?.id)>0
+    /^(i[1-9]\d?|ix)$/.test(slot)&&Number(x?.id)>0
    ).map(([slot,x])=>({id:Number(x.id),rf:Number(x.rf||0),slot}));
    const level=Number(s.lv||1);
    const ship={id:uid(),shipId:String(s.id),overrides:{},level,married:level>=100,kira:false,items};ships.push(ship);
@@ -1520,7 +1547,9 @@ document.addEventListener('keydown',e=>{
  buttons[(current<0?(step>0?0:buttons.length-1):(current+step+buttons.length)%buttons.length)]?.focus();
 });
 document.addEventListener('click',handleClick);
-document.addEventListener('change',e=>{if(e.target.id==='ship-picker-type'||e.target.matches('[data-ship-stage]')){refreshShipPicker(e.target.closest('dialog'));return;}handleChange(e);});
+document.addEventListener('change',e=>{if(e.target.id==='ship-picker-landing-craft')ui.landingCraftOnly=e.target.checked;
+ if(e.target.id==='ship-picker-type'||e.target.id==='ship-picker-landing-craft'||e.target.matches('[data-ship-stage]')){refreshShipPicker(e.target.closest('dialog'));return;}
+ handleChange(e);});
 document.addEventListener('change',async e=>{
  if(e.target.id==='json-file'){const file=e.target.files?.[0];if(!file)return;
  try{let incoming=JSON.parse(await file.text());if(incoming.version!==1||!Array.isArray(incoming.presets)||!Array.isArray(incoming.fleets))throw Error('未対応の設定形式です');if(!confirm('現在の設定をファイルの内容で上書きしますか？'))return;state=E.hydrateShipMaster(incoming);ui.selectedPreset=state.presets[0]?.id||'';ui.selectedFleet=state.fleets[0]?.id||'';persist();render();}catch(err){alert('読み込み失敗：'+err.message)}
