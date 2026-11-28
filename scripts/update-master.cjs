@@ -18,6 +18,7 @@ function extract(raw,sha){
  const equipment=a.api_mst_slotitem.map(x=>[x.api_id,x.api_name,x.api_type]).sort((a,b)=>a[0]-b[0]);
  assert(equipment.length>=600&&equipment.every(([id,name,type])=>int(id,1)&&typeof name==='string'&&name.trim()&&Array.isArray(type)&&type.length>=3&&type.every(t=>int(t))),'invalid equipment data');
  unique(equipment.map(x=>x[0]),'equipment');
+ assert(a.api_mst_mission.every(x=>typeof x.api_use_fuel==='number'&&Number.isFinite(x.api_use_fuel)&&x.api_use_fuel>=0&&x.api_use_fuel<=1&&typeof x.api_use_bull==='number'&&Number.isFinite(x.api_use_bull)&&x.api_use_bull>=0&&x.api_use_bull<=1),'missing or invalid consumption ratio');
  const expeditions=a.api_mst_mission.map(x=>({id:x.api_disp_no,apiId:x.api_id,name:x.api_name,minutes:x.api_time,fuelPct:Math.round(x.api_use_fuel*100),ammoPct:Math.round(x.api_use_bull*100),deckNum:x.api_deck_num,sampleFleet:x.api_sample_fleet,resetType:x.api_reset_type,damageType:x.api_damage_type})).sort((a,b)=>a.apiId-b.apiId);
  assert(expeditions.length>=61&&expeditions.every(x=>typeof x.id==='string'&&x.id.length&&int(x.apiId,1)&&typeof x.name==='string'&&x.name.trim()&&int(x.minutes,1)&&int(x.fuelPct)&&x.fuelPct<=100&&int(x.ammoPct)&&x.ammoPct<=100&&int(x.deckNum)&&Array.isArray(x.sampleFleet)&&int(x.resetType)&&int(x.damageType)),'invalid expedition data');
  unique(expeditions.map(x=>x.id),'expedition display');unique(expeditions.map(x=>x.apiId),'expedition API');
