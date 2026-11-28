@@ -216,6 +216,9 @@
 .ship-picker-footer{padding:8px 14px;border-top:1px solid #e4edf3;font-size:12px;color:#718899}
 .fleetship .ship-override-note{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 @media(max-width:790px),(hover:none) and (pointer:coarse){.ship-picker-trigger{font-size:16px;min-height:40px}.ship-picker-dialog{width:calc(100% - 20px)}}
+.ship-stage-filters{display:flex;align-items:center;gap:4px 12px;flex-wrap:wrap;border:0;margin:0;padding:2px 0 0;min-width:0}
+.ship-stage-filters legend{font-size:12px;color:#597285;margin-bottom:4px;padding:0}
+.ship-stage-filters .check-field{padding:4px 0;font-size:13px;white-space:nowrap;cursor:pointer}
 </style>
 </head>
 <body>
@@ -1128,9 +1131,20 @@ function shipTypeLabel(stype){
 function normalizeShipQuery(value){
  return String(value??'').normalize('NFKC').toLowerCase().trim();
 }
-function matchingShips(query,type){
+const SHIP_STAGES=[['base','未改造'],['middle','中間改造'],['final','最終改装']];
+function shipStageMatches(stage,stages){
+ return stage==='standalone'?stages.includes('base')||stages.includes('final'):stages.includes(stage||'final');
+}
+function shipStageLabel(stage){
+ return stage==='standalone'?'未改造・改装先なし':SHIP_STAGES.find(x=>x[0]===stage)?.[1]||'最終改装';
+}
+function shipPickerInitialStages(id){
+ const row=E.SHIP_MASTER_ROWS.find(x=>String(x[0])===String(id)),stage=row?.[5];
+ return ['final',...(['base','middle'].includes(stage)?[stage]:[])];
+}
+function matchingShips(query,type,stages=['final']){
  const q=normalizeShipQuery(query);
- return E.SHIP_MASTER_ROWS.filter(([id,name,stype])=>(type==='all'||shipTypeLabel(stype)===type)&&normalizeShipQuery(name).includes(q));
+ return E.SHIP_MASTER_ROWS.filter(([id,name,stype,fuel,ammo,stage])=>shipStageMatches(stage,stages)&&(type==='all'||shipTypeLabel(stype)===type)&&normalizeShipQuery(name).includes(q));
 }
 function shipPickerTrigger(ship,fleetId,index){
  const name=ship.shipId||Object.keys(ship.overrides||{}).length?E.shipField(ship,'name'):'艦娘を選択';
@@ -1138,14 +1152,15 @@ function shipPickerTrigger(ship,fleetId,index){
 }
 function shipPickerDialog(){
  const types=[...new Set(Object.values(E.SHIP_TYPES))];
- return `<dialog id="ship-picker-dialog" class="ship-picker-dialog" aria-labelledby="ship-picker-title"><div class="ship-picker-head"><div class="row-between"><h2 id="ship-picker-title">艦娘を選択</h2>${button('ship-picker-close','×','btn tiny','aria-label="閉じる" autofocus')}</div><div class="ship-picker-filters"><input type="search" id="ship-picker-query" placeholder="艦娘名で検索" aria-label="艦娘名で検索" autocomplete="off"><select id="ship-picker-type" aria-label="艦種フィルタ">${options([{value:'all',label:'すべての艦種'},...types.map(name=>({value:name,label:name}))],'all')}</select></div></div><div class="ship-picker-columns"><span>艦娘・艦種</span><span>燃料 ／ 弾薬　　</span></div><div class="ship-picker-results" id="ship-picker-results"></div><div class="ship-picker-footer" id="ship-picker-count" aria-live="polite"></div></dialog>`;
+ return `<dialog id="ship-picker-dialog" class="ship-picker-dialog" aria-labelledby="ship-picker-title"><div class="ship-picker-head"><div class="row-between"><h2 id="ship-picker-title">艦娘を選択</h2>${button('ship-picker-close','×','btn tiny','aria-label="閉じる" autofocus')}</div><div class="ship-picker-filters"><input type="search" id="ship-picker-query" placeholder="艦娘名で検索" aria-label="艦娘名で検索" autocomplete="off"><select id="ship-picker-type" aria-label="艦種フィルタ">${options([{value:'all',label:'すべての艦種'},...types.map(name=>({value:name,label:name}))],'all')}</select><fieldset class="ship-stage-filters"><legend>改造段階</legend>${SHIP_STAGES.map(([key,label])=>`<label class="check-field"><input type="checkbox" data-ship-stage="${key}" ${key==='final'?'checked':''}> ${label}</label>`).join('')}</fieldset></div></div><div class="ship-picker-columns"><span>艦娘・艦種</span><span>燃料 ／ 弾薬　　</span></div><div class="ship-picker-results" id="ship-picker-results"></div><div class="ship-picker-footer" id="ship-picker-count" aria-live="polite"></div></dialog>`;
 }
 function shipChoice(row,selected){
- const [id,name,stype,fuel,ammo]=row,active=String(id)===String(selected);
- return `<button type="button" class="ship-choice" data-action="ship-picker-select" data-value="${id}" aria-pressed="${active}"><span class="ship-choice-identity"><span class="ship-choice-name">${esc(name)}</span><span class="ship-choice-type">${esc(shipTypeLabel(stype))}</span></span><span class="exp-res exp-res-fuel">${fuel}</span><span class="exp-res exp-res-ammo">${ammo}</span><span class="ship-choice-check" aria-hidden="true">${active?'✓':''}</span></button>`;
+ const [id,name,stype,fuel,ammo,stage]=row,active=String(id)===String(selected);
+ return `<button type="button" class="ship-choice" data-action="ship-picker-select" data-value="${id}" aria-pressed="${active}"><span class="ship-choice-identity"><span class="ship-choice-name">${esc(name)}</span><span class="ship-choice-type">${esc(shipTypeLabel(stype))} · ${esc(shipStageLabel(stage))}</span></span><span class="exp-res exp-res-fuel">${fuel}</span><span class="exp-res exp-res-ammo">${ammo}</span><span class="ship-choice-check" aria-hidden="true">${active?'✓':''}</span></button>`;
 }
 function refreshShipPicker(dialog,scrollSelected=false){
- const rows=matchingShips(dialog.querySelector('#ship-picker-query').value,dialog.querySelector('#ship-picker-type').value);
+ const stages=[...dialog.querySelectorAll('[data-ship-stage]:checked')].map(x=>x.dataset.shipStage);
+ const rows=matchingShips(dialog.querySelector('#ship-picker-query').value,dialog.querySelector('#ship-picker-type').value,stages);
  const ship=fleetById(dialog.dataset.fid)?.ships[Number(dialog.dataset.index)],selected=ship?.shipId;
  const results=dialog.querySelector('#ship-picker-results');
  results.innerHTML=rows.length?rows.map(row=>shipChoice(row,selected)).join(''):'<div class="ship-picker-empty">該当する艦娘がありません。</div>';
@@ -1159,6 +1174,8 @@ function openShipPicker(fid,index){
  dialog.dataset.fid=fid;dialog.dataset.index=String(index);
  dialog.querySelector('#ship-picker-query').value='';
  dialog.querySelector('#ship-picker-type').value='all';
+ const stages=shipPickerInitialStages(ship.shipId);
+ for(const input of dialog.querySelectorAll('[data-ship-stage]'))input.checked=stages.includes(input.dataset.shipStage);
  dialog.showModal();
  refreshShipPicker(dialog,true);
 }
@@ -1418,7 +1435,7 @@ document.addEventListener('keydown',e=>{
  buttons[(current<0?(step>0?0:buttons.length-1):(current+step+buttons.length)%buttons.length)]?.focus();
 });
 document.addEventListener('click',handleClick);
-document.addEventListener('change',e=>{if(e.target.id==='ship-picker-type'){refreshShipPicker(e.target.closest('dialog'));return;}handleChange(e);});
+document.addEventListener('change',e=>{if(e.target.id==='ship-picker-type'||e.target.matches('[data-ship-stage]')){refreshShipPicker(e.target.closest('dialog'));return;}handleChange(e);});
 document.addEventListener('change',async e=>{
  if(e.target.id==='json-file'){const file=e.target.files?.[0];if(!file)return;
  try{let incoming=JSON.parse(await file.text());if(incoming.version!==1||!Array.isArray(incoming.presets)||!Array.isArray(incoming.fleets))throw Error('未対応の設定形式です');if(!confirm('現在の設定をファイルの内容で上書きしますか？'))return;state=E.hydrateShipMaster(incoming);ui.selectedPreset=state.presets[0]?.id||'';ui.selectedFleet=state.fleets[0]?.id||'';persist();render();}catch(err){alert('読み込み失敗：'+err.message)}
