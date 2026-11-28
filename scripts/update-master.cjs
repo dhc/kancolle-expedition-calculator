@@ -3,15 +3,49 @@ const SOURCE='https://raw.githubusercontent.com/kcwiki/kancolle-data/master/api/
 function assert(ok,msg){if(!ok)throw new Error(msg)}
 const int=(x,min=0)=>Number.isInteger(x)&&x>=min;
 const unique=(arr,label)=>assert(new Set(arr).size===arr.length,label+' duplicate IDs');
+// Terminal strongly connected components include all reversible conversion forms.
+function remodelStages(player,upgrades){
+ const ids=new Set(player.map(x=>x.api_id));
+ const edges=new Map([...ids].map(id=>[id,new Set()]));
+ const incoming=new Map([...ids].map(id=>[id,new Set()]));
+ function link(from,to){
+  assert(ids.has(from)&&ids.has(to),'invalid remodel edge: '+from+' -> '+to);
+  if(from===to)return;
+  edges.get(from).add(to);incoming.get(to).add(from);
+ }
+ for(const ship of player){
+  assert(ship.api_aftershipid!==undefined&&ship.api_aftershipid!==null&&String(ship.api_aftershipid).trim()!=='','missing remodel target: '+ship.api_id);
+  const target=Number(ship.api_aftershipid);
+  assert(int(target),'invalid remodel target: '+ship.api_id);
+  if(target)link(ship.api_id,target);
+ }
+ for(const u of upgrades){
+  assert(int(u.api_current_ship_id)&&int(u.api_id,1),'invalid ship upgrade record');
+  if(u.api_current_ship_id&&ids.has(u.api_current_ship_id))link(u.api_current_ship_id,u.api_id);
+ }
+ function reachable(id){
+  const seen=new Set([id]),queue=[id];
+  for(let i=0;i<queue.length;i++)for(const to of edges.get(queue[i]))if(!seen.has(to)){seen.add(to);queue.push(to);}
+  return seen;
+ }
+ const stages=new Map(),reach=new Map([...ids].map(id=>[id,reachable(id)]));
+ for(const id of ids){
+  if(!incoming.get(id).size&&!edges.get(id).size){stages.set(id,'standalone');continue;}
+  const terminal=[...reach.get(id)].every(to=>reach.get(to).has(id));
+  stages.set(id,terminal?'final':!incoming.get(id).size?'base':'middle');
+ }
+ return stages;
+}
 function extract(raw,sha){
  assert(/^[a-f0-9]{40}$/.test(sha),'invalid source blob SHA');
  const a=raw.api_data||raw;
- for(const k of ['api_mst_ship','api_mst_stype','api_mst_slotitem','api_mst_mission'])assert(Array.isArray(a[k])&&a[k].length>0,'missing '+k);
+ for(const k of ['api_mst_ship','api_mst_stype','api_mst_slotitem','api_mst_mission','api_mst_shipupgrade'])assert(Array.isArray(a[k])&&a[k].length>0,'missing '+k);
  const types=Object.fromEntries(a.api_mst_stype.map(x=>[x.api_id,x.api_name]));
  unique(a.api_mst_stype.map(x=>x.api_id),'ship type');
  assert(a.api_mst_stype.every(x=>int(x.api_id,1)&&typeof x.api_name==='string'&&x.api_name.trim()),'invalid ship type');
  const player=a.api_mst_ship.filter(x=>x.api_id<1500&&x.api_sortno>0);
- const ships=player.map(x=>[x.api_id,x.api_name,x.api_stype,x.api_fuel_max,x.api_bull_max]).sort((a,b)=>a[0]-b[0]);
+ const stages=remodelStages(player,a.api_mst_shipupgrade);
+ const ships=player.map(x=>[x.api_id,x.api_name,x.api_stype,x.api_fuel_max,x.api_bull_max,stages.get(x.api_id)]).sort((a,b)=>a[0]-b[0]);
  assert(ships.length>=800&&ships.every(([id,name,type,fuel,ammo])=>int(id,1)&&typeof name==='string'&&name.trim()&&types[type]&&int(fuel)&&int(ammo)),'invalid player ship data');
  unique(ships.map(x=>x[0]),'ship');
  assert(ships.some(x=>x[0]===487),'Kinu Kai Ni missing');
@@ -22,7 +56,7 @@ function extract(raw,sha){
  const expeditions=a.api_mst_mission.map(x=>({id:x.api_disp_no,apiId:x.api_id,name:x.api_name,minutes:x.api_time,fuelPct:Math.round(x.api_use_fuel*100),ammoPct:Math.round(x.api_use_bull*100),deckNum:x.api_deck_num,sampleFleet:x.api_sample_fleet,resetType:x.api_reset_type,damageType:x.api_damage_type})).sort((a,b)=>a.apiId-b.apiId);
  assert(expeditions.length>=61&&expeditions.every(x=>typeof x.id==='string'&&x.id.length&&int(x.apiId,1)&&typeof x.name==='string'&&x.name.trim()&&int(x.minutes,1)&&int(x.fuelPct)&&x.fuelPct<=100&&int(x.ammoPct)&&x.ammoPct<=100&&int(x.deckNum)&&Array.isArray(x.sampleFleet)&&int(x.resetType)&&int(x.damageType)),'invalid expedition data');
  unique(expeditions.map(x=>x.id),'expedition display');unique(expeditions.map(x=>x.apiId),'expedition API');
- return {schema:1,source:SOURCE,sourceSha:sha,types,ships,equipment,expeditions};
+ return {schema:2,source:SOURCE,sourceSha:sha,types,ships,equipment,expeditions};
 }
 function changes(old,next){
  const out={};
@@ -46,7 +80,7 @@ function files(master){
  const manifest=JSON.stringify({schema:master.schema,source:master.source,sourceSha:master.sourceSha,counts:{ships:master.ships.length,types:Object.keys(master.types).length,equipment:master.equipment.length,expeditions:master.expeditions.length}},null,2)+'\n';
  return {'data/game-master.json':json,'data/game-master.js':bundle,'data/manifest.json':manifest};
 }
-module.exports={extract,changes,guard,files,SOURCE};
+module.exports={extract,changes,guard,files,SOURCE,remodelStages};
 
 if(require.main===module){
  const fs=require('node:fs'),crypto=require('node:crypto'),vm=require('node:vm');
@@ -63,7 +97,7 @@ if(require.main===module){
  const sha=crypto.createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');
  const next=extract(JSON.parse(bytes.toString('utf8')),sha);
  const diff=guard(old,next,readRules());
- const changed=Object.values(diff).some(d=>d.added.length||d.changed.length||d.removed.length);
+ const changed=old.schema!==next.schema||Object.values(diff).some(d=>d.added.length||d.changed.length||d.removed.length);
  console.log(JSON.stringify(diff,null,2));
  if(!changed){console.log('No relevant master changes');return;}
  for(const [path,content] of Object.entries(files(next)))fs.writeFileSync(path,content);
