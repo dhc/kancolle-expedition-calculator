@@ -105,3 +105,33 @@ assert.deepEqual(syntheticPicker.shipPickerInitialStages(3),['final']);
 assert.ok(syntheticPicker.matchingShips('新艦','all',['base']).length===1);
 assert.ok(syntheticPicker.matchingShips('新艦','all',['final']).length===1);
 console.log('Remodel stages, conversion cycles, filters, imported selection: OK');
+
+const auto={probMode:'fleet'};
+const fleetWithKira=(count,kira,level=99,drums=[])=>({
+ ships:Array.from({length:count},(_,i)=>({kira:i<kira,level,
+  items:Array.from({length:drums[i]||0},()=>({id:75}))}))
+});
+const probability=(id,fleet)=>E.getProb(auto,fleet,80,{id}).value;
+for(const [count,expected] of [[2,.51],[3,.66],[4,.81],[5,.96],[6,1]]){
+ assert.equal(probability('01',fleetWithKira(count,count)),expected);
+}
+assert.equal(probability('05',fleetWithKira(6,5)),0);
+assert.equal(probability('37',fleetWithKira(6,4,99,[2,1,1])),.66);
+assert.equal(probability('37',fleetWithKira(6,4,99,[2,2,1])),1);
+assert.equal(probability('37',fleetWithKira(6,0,99,[2,2,1])),.41);
+assert.equal(probability('37',fleetWithKira(6,4,99,[2,2])),0);
+assert.equal(probability('37',{...fleetWithKira(6,4,99,[2,1,1]),extraEquipment:{drum:1}}),.66);
+assert.equal(probability('24',fleetWithKira(6,0)),.06);
+assert.equal(probability('24',fleetWithKira(6,3,99,[2])),.86);
+assert.equal(probability('41',fleetWithKira(4,0)),.35);
+assert.equal(probability('A2',fleetWithKira(4,4,127)),.99);
+assert.equal(probability('A2',fleetWithKira(4,4,128)),1);
+assert.equal(probability('D2',fleetWithKira(5,5,33)),1);
+assert.equal(probability('32',fleetWithKira(3,0)),.35);
+assert.equal(probability('D1',{ships:[{kira:false}]}),.8);
+assert.equal(probability('A2',null),.8);
+assert.equal(E.getProb({probMode:'common'},fleetWithKira(6,6),71,{id:'02'}).value,.71);
+assert.equal(E.getProb({probMode:'manual',greatPct:42},fleetWithKira(6,6),80,{id:'02'}).value,.42);
+assert.equal(E.simpleExpRow({kira:true},{id:'41'},{commonGreatPct:71}).greatPct,71);
+assert.equal(E.simpleExpRow({kira:false},{id:'41'},{commonGreatPct:71}).greatPct,0);
+console.log('Expedition great-success formulas, thresholds, and common/manual settings: OK');
