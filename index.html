@@ -863,7 +863,7 @@ function renderSchedulerTimeline(audit,preset){
  const unassigned=audit.runs.filter(s=>!timelineAssigned(s));
  const overflow=audit.runs.filter(s=>timelineAssigned(s)&&Math.max(0,Number(s.dayOffset)||0)>0);
  const strip=s=>`<div class="timeline-strip ${s.exp.monthly?'timeline-monthly ':''}${timelineOverlap(s,audit.runs)?'timeline-conflict':''}" data-drag-sid="${esc(s.id)}" data-pid="${esc(preset.id)}" title="${esc(s.exp.name)}">${esc(s.exp.name)}${overflow.includes(s)?'（翌運用日）':''}</div>`;
- return `<section class="panel section"><div class="sectionhead"><div><h2>艦隊枠の占有状況</h2><p>1日の範囲：${esc(startLabel)} 〜 ${esc(endLabel)}。左端が基準時刻、右端が翌日の基準時刻です。</p></div></div>
+ return `<section class="panel section"><div class="sectionhead"><div><h2>遠征タイムライン</h2><p>1日の範囲：${esc(startLabel)} 〜 ${esc(endLabel)}。左端が基準時刻、右端が翌日の基準時刻です。</p></div></div>
  <div class="timeline-head"><span></span><div class="timeline-hours">${hours.map(x=>{const t=E.clockString(base+x*60);return `<span title="${esc(t)}">${esc(t.slice(0,5))}</span>`}).join('')}</div></div>
  ${[2,3,4].map(slot=>`<div class="timeline-row"><div class="timeline-label">第${slot}艦隊</div><div class="timeline-track" data-drop-slot="${slot}" data-pid="${esc(preset.id)}">${bars(slot)}</div></div>`).join('')}
  <h3 style="margin-top:15px">未割当の遠征</h3><div class="timeline-unassigned" data-drop-slot="" data-pid="${esc(preset.id)}">${unassigned.length?unassigned.map(strip).join(''):'<span class="note">ここへドラッグすると割当を解除します。</span>'}</div>
@@ -896,30 +896,34 @@ function renderScheduler(){
  const period=E.computePlan(state,EXP).perPreset[p.id];
  const dayStart=E.dayStartMinutes(p);
  const unavailable=Array.isArray(p.unavailablePeriods)?p.unavailablePeriods:[];
- const unavailableUI=`<section class="schedule-unavailable"><div class="row-between"><div><h3>触れない時間帯</h3><p class="note">出発予定の「遠征複製」時に、帰投がこの時間帯なら終了後に出発を繰り下げます。</p></div>${button('schedule-away-add','＋ 時間帯を追加','btn tiny',`data-pid="${esc(p.id)}"`)}</div>
+ const unavailableUI=`<section class="schedule-unavailable"><div class="row-between"><div><h3>触れない時間帯</h3><p class="note">遠征計画の「遠征複製」時に、帰投がこの時間帯なら終了後に出発を繰り下げます。</p></div>${button('schedule-away-add','＋ 時間帯を追加','btn tiny',`data-pid="${esc(p.id)}"`)}</div>
  ${unavailable.length?unavailable.map((period,i)=>`<div class="schedule-away-row"><div class="field schedule-clock"><label>開始（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.start)}" data-change="schedule-away" data-field="start" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 開始"></div><span class="away-separator">〜</span><div class="field schedule-clock"><label>終了（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.end)}" data-change="schedule-away" data-field="end" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 終了"></div>${button('schedule-away-remove','削除','btn tiny danger',`data-pid="${esc(p.id)}" data-index="${i}"`)}</div>`).join(''):'<p class="note">未登録：従来どおり帰投直後に複製します。</p>'}
  <p class="note">例：0900〜1800、2300〜0700。日付をまたぐ設定も可能です。登録済みの出発予定は自動変更しません。</p></section>`;
- const detail=`<details class="panel section" ${ui.scheduleDetails?'open':''} id="schedule-details"><summary>遠征回数・補正・補給費の詳細編集</summary>${p.rows.map(row=>renderRow(row,'preset',p.id)).join('')}${button('add-row','＋ 遠征を追加','btn',`data-pid="${esc(p.id)}"`)}</details>`;
+ const detail=`<details class="panel section" ${ui.scheduleDetails?'open':''} id="schedule-details"><summary>遠征の補正・補給費設定</summary>${p.rows.map(row=>renderRow(row,'preset',p.id)).join('')}${button('add-row','＋ 遠征を追加','btn',`data-pid="${esc(p.id)}"`)}</details>`;
  const legacy=state.monthlyRows.length?`<details class="panel section"><summary>旧月次遠征データ（互換設定）</summary><p class="note">従来の月次加算設定です。必要に応じて新規プリセットへ移行できます。</p>${state.monthlyRows.map(row=>renderRow(row,'monthly','')).join('')}${button('migrate-monthly','新規プリセットに移行','btn primary')}</details>`:'';
- const top=`<section class="panel section"><div class="sectionhead"><div><h2>遠征スケジューラー</h2><p>遠征の回数を、実際の出発時刻と第2〜第4艦隊の枠へ割り当てます。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
+ const top=`<section class="panel section"><div class="sectionhead"><div><h2>運用プリセット</h2><p>設計する運用パターンを選択し、1日の基準時刻と触れない時間帯を設定します。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
  <div class="preset-list">${state.presets.map(x=>`<button type="button" class="preset-tab ${x.id===p.id?'selected':''}" data-action="choose-preset" data-pid="${esc(x.id)}">${esc(x.name)}<span>${x.rows.reduce((n,r)=>n+E.clamp(r.count,0,200),0)}回 / 日</span></button>`).join('')}</div>
  <div class="row-wrap"><div class="field grow"><label>プリセット名</label><input type="text" data-change="preset-name" data-pid="${esc(p.id)}" value="${esc(p.name)}" maxlength="50"></div>${button('remove-preset','削除','btn danger',`data-pid="${esc(p.id)}"`)}</div>
  <div class="schedule-day-start"><div class="field schedule-clock"><label>1日の基準時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="0700" value="${E.clockDigits(dayStart)}" data-change="schedule-base" data-pid="${esc(p.id)}" aria-label="1日の基準時刻（4桁）"></div><div class="note">このプリセットの1日：<strong>${E.clockString(dayStart)} 〜 ${E.clockString(dayStart+1440)}</strong>。超過する予定も登録できますが、警告を表示します。</div></div>
  ${unavailableUI}
- <p class="note">スケジューラーは任意機能です。開始時刻は 0830 のように4桁で入力します。基準時刻より前の時刻は翌日の出発です。「遠征複製」は帰投直後、触れない時間帯に重なるときは終了時刻から次の遠征を開始します。出発時刻が未設定でも資源収支は計算できます。</p>
- ${!p.scheduleEnabled?`<div class="notice">このプリセットの遠征を1回ずつ出発予定へ展開できます。既存の収支設定は変更しません。</div>${button('schedule-enable','このプリセットの予定を作成','btn primary',`data-pid="${esc(p.id)}"`)}`:
- `<div class="row-wrap">${button('schedule-add','+ 遠征を1回追加','btn primary',`data-pid="${esc(p.id)}"`)}${button('schedule-disable','予定の時刻設定を解除','btn danger',`data-pid="${esc(p.id)}"`)}</div>`}
  </section>`;
- if(!p.scheduleEnabled)return `<div class="stack">${top}${detail}${legacy}</div>`;
+ if(!p.scheduleEnabled){
+  const inactive=`<section class="panel section"><div class="sectionhead"><div><h2>遠征計画</h2><p>遠征の種類・艦隊枠・出発時刻を登録します。</p></div>${button('schedule-add','＋ 遠征を追加','btn primary',`data-pid="${esc(p.id)}"`)}</div>
+  ${p.rows.some(row=>Number(row.count)>0)?`<div class="notice">既存の遠征を1回ずつ計画に展開できます。収支設定は変更しません。</div>${button('schedule-enable','既存の遠征を計画に展開','btn',`data-pid="${esc(p.id)}"`)}`:'<div class="empty">遠征が登録されていません。「＋ 遠征を追加」から運用計画を作成します。</div>'}
+  </section>`;
+  return `<div class="stack">${top}${inactive}${detail}${legacy}</div>`;
+ }
  const audit=E.scheduleAudit(p,EXP);
- const status=`<section class="panel section"><div class="row-between"><div><h2>出発予定</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><div class="row-wrap">${button('schedule-sort','艦隊・時刻順','btn',`data-pid="${esc(p.id)}"`)}<span class="chip ${audit.complete?'green':'amber'}">${audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div></div>
+ const status=`<section class="panel section"><div class="row-between"><div><h2>遠征計画</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><div class="row-wrap">${button('schedule-add','＋ 遠征を追加','btn primary',`data-pid="${esc(p.id)}"`)}${button('schedule-sort','艦隊・時刻順','btn',`data-pid="${esc(p.id)}"`)}<span class="chip ${audit.complete&&audit.runs.length?'green':'amber'}">${!audit.runs.length?'未登録':audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div></div>
+ <p class="note">遠征の種類・艦隊枠・出発時刻を登録します。開始時刻は0830のように4桁で入力します。基準時刻より前は翌日の出発です。遠征複製は帰投後の操作可能な時刻を使用します。時刻未設定でも収支を計算できます。</p>
  <div class="sumstrip"><span><strong>1日分の獲得期待値：</strong>${['fuel','ammo','steel','bauxite'].map((k,i)=>`${['燃','弾','鋼','ボ'][i]} ${fmt(period.earned[k])}`).join(' ／ ')}</span><span class="muted">${E.formatOccupation(period.occupation.totalMinutes)} / 延べ</span></div>
  <p class="note">この金額は予定が未配置でもプリセット内の全遠征を集計した値です。編成未登録時は補給費を差し引いていません。月次遠征は運用設定で暦月1回までの概算計上となります。</p>
  ${[...new Set(audit.runs.filter(x=>x.exp.monthly&&audit.runs.filter(y=>y.exp.id===x.exp.id).length>1).map(x=>x.exp.name))].map(name=>`<div class="warning">月次遠征「${esc(name)}」が同じプリセットに複数あります。</div>`).join('')}
  ${audit.hard.map(x=>`<div class="warning">要確認（登録済み）：${esc(x)}</div>`).join('')}
  ${audit.soft.map(x=>`<div class="notice">艦娘編成の重複：${esc(x)}</div>`).join('')}
  ${audit.runs.filter(x=>x.start!==null&&x.start!==undefined&&x.start!==''&&E.nextAvailableMinute(p,E.dayAbsoluteMinute(x.start,dayStart))>E.dayAbsoluteMinute(x.start,dayStart)).map(x=>`<div class="notice">${esc(x.exp.name)}（${esc(E.clockString(E.dayAbsoluteMinute(x.start,dayStart)))}発）は、触れない時間帯に出発する設定です。</div>`).join('')}
- ${audit.runs.length?audit.runs.map(x=>renderScheduleEntry(p,x)).join(''):'<div class="empty">遠征がありません。＋遠征を1回追加してください。</div>'}
+ ${audit.runs.length?audit.runs.map(x=>renderScheduleEntry(p,x)).join(''):'<div class="empty">遠征が登録されていません。「＋ 遠征を追加」から運用計画を作成します。</div>'}
+ <div class="row-wrap" style="margin-top:12px">${button('schedule-disable','時刻・艦隊枠の割当を解除','btn danger',`data-pid="${esc(p.id)}"`)}</div>
  </section>`;
  return `<div class="stack">${top}${renderSchedulerTimeline(audit,p)}${status}${detail}${legacy}</div>`;
 }
@@ -1131,7 +1135,7 @@ function handleClick(e){
  if(a==='schedule-sort'){update(()=>{const p=presetById(d.pid);if(p)sortScheduleDepartures(p);});return;}
  if(a==='schedule-enable'){update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=true;p.schedule=[];}});return}
  if(a==='schedule-disable'){if(!confirm('このプリセットの時刻と艦隊枠の割当を解除しますか？　遠征と回数は残ります。'))return;update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=false;p.schedule=[];}});return}
- if(a==='schedule-add'){update(()=>{const p=presetById(d.pid);if(!p)return;p.rows.push(E.makeRow('05'));});return}
+ if(a==='schedule-add'){update(()=>{const p=presetById(d.pid);if(!p)return;if(!p.scheduleEnabled){p.scheduleEnabled=true;p.schedule=[];}p.rows.push(E.makeRow('05'));});return}
  if(a==='schedule-away-add'){
   update(()=>{const p=presetById(d.pid);if(p){p.unavailablePeriods??=[];p.unavailablePeriods.push({start:540,end:1080});}});return;
  }
