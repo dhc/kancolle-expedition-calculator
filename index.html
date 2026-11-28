@@ -454,7 +454,7 @@ function computePlan(state,expeditions){
  };
 }
 function makeRow(expId){return {id:Math.random().toString(36).slice(2,10),expId,count:1,fleetId:'',probMode:'common',greatPct:80,bonusMode:'none',bonusPct:0,costMode:'fleet',costFuel:0,costAmmo:0};}
-function initial(){return {version:1,settings:{commonGreatPct:80},presets:[{id:'p1',name:'平日運用',dayStart:0,rows:[]},{id:'p2',name:'休日運用',dayStart:0,rows:[]},{id:'p3',name:'メンテ日運用',dayStart:0,rows:[]}],weekly:[{presetId:'p1',days:5},{presetId:'p2',days:2}],exceptions:[],monthlyRows:[],fleets:[]};}
+function initial(){return {version:1,settings:{commonGreatPct:80},presets:[{id:'p1',name:'平日運用',dayStart:300,rows:[]},{id:'p2',name:'休日運用',dayStart:300,rows:[]},{id:'p3',name:'メンテ日運用',dayStart:300,rows:[]}],weekly:[{presetId:'p1',days:5},{presetId:'p2',days:2}],exceptions:[],monthlyRows:[],fleets:[]};}
 function sample(){const s=initial();s.presets[0].name='通常運用';s.presets[0].rows=[{...makeRow('05'),count:3},{...makeRow('37'),count:2},{...makeRow('11'),count:1}];s.presets[1].name='休日運用';s.presets[1].rows=[{...makeRow('02'),count:6},{...makeRow('06'),count:4},{...makeRow('05'),count:4}];s.presets[2].name='メンテ日';s.presets[2].rows=[{...makeRow('09'),count:1},{...makeRow('11'),count:1}];s.exceptions=[{id:'ex1',name:'月1回メンテ',presetId:'p3',replaceId:'p1',count:1}];return s;}
 
 // A scheduled run occupies one expedition slot, regardless of the selected ship formation.
@@ -468,8 +468,8 @@ function repeatingOverlap(aStart,aLength,bStart,bLength){
 // Wall-clock times before dayStart belong to the *following* calendar day.
 // Keep the stored HHMM minute value (0..1439) unchanged for backward compatibility.
 function dayStartMinutes(preset){
- const m=Number(preset?.dayStart??0);
- return Number.isInteger(m)&&m>=0&&m<1440?m:0;
+ const m=Number(preset?.dayStart??300);
+ return Number.isInteger(m)&&m>=0&&m<1440?m:300;
 }
 function dayRelativeMinute(wallMinutes,dayStart=0){
  return ((Number(wallMinutes)-dayStart)%1440+1440)%1440;
@@ -546,14 +546,30 @@ function scheduleConflicts(candidate,others,dayStart=0){
  return {hard,soft};
 }
 function clockString(minutes){const m=Math.floor(Number(minutes)||0);return `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}${m>=1440?`（翌日）`:''}`;}
-// Scheduler time inputs use exactly four numeric digits, e.g. 0830 (08:30).
+// Accept HMM/HHMM; extended hours are allowed only for departure times.
 // null means not assigned; undefined means invalid input.
-function parseClockDigits(value){
+function parseClockDigits(value,extended=false){
  const raw=String(value??'').trim();
  if(raw==='')return null;
- if(!/^\d{4}$/.test(raw))return undefined;
- const hour=Number(raw.slice(0,2)),minute=Number(raw.slice(2));
- return hour<24&&minute<60?hour*60+minute:undefined;
+ if(!/^\d{3,4}$/.test(raw))return undefined;
+ const digits=raw.padStart(4,'0'),hour=Number(digits.slice(0,2)),minute=Number(digits.slice(2));
+ return hour<(extended?100:24)&&minute<60?hour*60+minute:undefined;
+}
+function departureClock(value,base){
+ const parsed=parseClockDigits(value,true);
+ if(parsed===undefined)return undefined;
+ if(parsed===null)return {start:null,dayOffset:0};
+ const start=parsed%1440;
+ // Ordinary wall-clock times are resolved within the operational day.
+ // 24+ hour input explicitly denotes a calendar-day offset.
+ const dayOffset=parsed<1440?0:Math.floor((parsed-dayAbsoluteMinute(start,base))/1440);
+ return {start,dayOffset:Math.max(0,dayOffset)};
+}
+function departureDigits(entry,base){
+ if(entry.start===null||entry.start===undefined||entry.start==='')return '';
+ const m=dayAbsoluteMinute(entry.start,base)+Math.max(0,Number(entry.dayOffset)||0)*1440;
+ // Preserve a readable wall time if an automatically duplicated departure exceeds 99h.
+ return m<6000?String(Math.floor(m/60)).padStart(2,'0')+String(m%60).padStart(2,'0'):clockDigits(entry.start);
 }
 function clockDigits(minutes){
  if(minutes===null||minutes===undefined||minutes==='')return '';
@@ -568,7 +584,7 @@ function scheduleAudit(preset,expeditions){
  return {runs,missing,hard,soft,placed:runs.length-missing,complete:!missing&&!hard.length,dayStart};
 }
 
-root.ExpCalc={minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
+root.ExpCalc={minutesOverlap,repeatingOverlap,dayStartMinutes,dayRelativeMinute,dayAbsoluteMinute,unavailableIntervals,nextAvailableMinute,scheduledRuns,scheduleConflicts,scheduleAudit,clockString,clockDigits,parseClockDigits,departureClock,departureDigits,KEYS,EQUIPMENT,DRUM_GREAT,zero,add,clamp,equipmentTotals,getProb,getBonus,shipCost,calcFuelCost,expeditionOutcome,sumPreset,sumMonthly,occupationForRows,formatOccupation,operationRules,calendarCounts,simpleExpRow,simpleCalculate,computePlan,makeRow,initial,sample};
 if(typeof module!=='undefined'&&module.exports)module.exports=root.ExpCalc;
 })(typeof window!=='undefined'?window:globalThis);
 
@@ -876,14 +892,14 @@ function renderScheduleEntry(p,s){
  const assigned=['2','3','4'].includes(String(s.slot))&&s.start!==null&&s.start!==undefined&&s.start!=='';
  const base=E.dayStartMinutes(p);
  const dayOffset=Math.max(0,Number(s.dayOffset)||0);
- const absoluteStart=assigned?E.dayAbsoluteMinute(s.start,base)+dayOffset*1440:null;
+ const absoluteStart=s.start!==null&&s.start!==undefined&&s.start!==''?E.dayAbsoluteMinute(s.start,base)+dayOffset*1440:null;
  const end=assigned?`→ ${E.clockString(absoluteStart+s.duration)}`:'未配置';
- const startDayNote=dayOffset>0?`<span class="chip amber">翌運用日 +${dayOffset}日 ${button('schedule-reset-offset','基本日に戻す','btn tiny',attr)}</span>`:(assigned&&absoluteStart>=1440?'<span class="chip blue">翌日の出発</span>':'');
+ const startDayNote=dayOffset>0?`<span class="chip amber">翌運用日 +${dayOffset}日 ${button('schedule-reset-offset','基本日に戻す','btn tiny',attr)}</span>`:(absoluteStart!==null&&absoluteStart>=1440?'<span class="chip blue">翌日の出発</span>':'');
  const issue=assigned?E.scheduleConflicts(s,scheduleRows(p),base):null;
  return `<div class="schedule-entry ${issue?.hard.length?'schedule-conflict':''}">
  <div class="schedule-entry-fields">${expeditionPicker(exp.id,null,attr)}
  ${selectField('艦隊枠',[{value:'',label:'未割当'},{value:'2',label:'第2艦隊'},{value:'3',label:'第3艦隊'},{value:'4',label:'第4艦隊'}],s.slot||'',`data-change="schedule" data-field="slot" ${attr}`,'medium')}
- <div class="field schedule-clock"><label>開始時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" class="schedule-time-input" placeholder="0830" maxlength="4" autocomplete="off" value="${E.clockDigits(s.start)}" data-change="schedule" data-field="start" ${attr}></div>
+ <div class="field schedule-clock"><label>開始時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{3,4}" class="schedule-time-input" placeholder="0830" maxlength="4" autocomplete="off" value="${E.departureDigits(s,base)}" data-change="schedule" data-field="start" ${attr}></div>
  <div class="field schedule-formation"><label>使用編成</label><select data-change="schedule" data-field="formationId" ${attr}>${fleetOptions(row.fleetId)}</select></div>
  ${button('schedule-duplicate','遠征複製','btn tiny schedule-duplicate',attr)}
  ${button('schedule-remove','削除','btn tiny danger schedule-remove',attr)}
@@ -897,14 +913,14 @@ function renderScheduler(){
  const dayStart=E.dayStartMinutes(p);
  const unavailable=Array.isArray(p.unavailablePeriods)?p.unavailablePeriods:[];
  const unavailableUI=`<section class="schedule-unavailable"><div class="row-between"><div><h3>触れない時間帯</h3><p class="note">遠征計画の「遠征複製」時に、帰投がこの時間帯なら終了後に出発を繰り下げます。</p></div>${button('schedule-away-add','＋ 時間帯を追加','btn tiny',`data-pid="${esc(p.id)}"`)}</div>
- ${unavailable.length?unavailable.map((period,i)=>`<div class="schedule-away-row"><div class="field schedule-clock"><label>開始（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.start)}" data-change="schedule-away" data-field="start" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 開始"></div><span class="away-separator">〜</span><div class="field schedule-clock"><label>終了（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.end)}" data-change="schedule-away" data-field="end" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 終了"></div>${button('schedule-away-remove','削除','btn tiny danger',`data-pid="${esc(p.id)}" data-index="${i}"`)}</div>`).join(''):'<p class="note">未登録：従来どおり帰投直後に複製します。</p>'}
+ ${unavailable.length?unavailable.map((period,i)=>`<div class="schedule-away-row"><div class="field schedule-clock"><label>開始（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.start)}" data-change="schedule-away" data-field="start" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 開始"></div><span class="away-separator">〜</span><div class="field schedule-clock"><label>終了（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" value="${E.clockDigits(period.end)}" data-change="schedule-away" data-field="end" data-index="${i}" data-pid="${esc(p.id)}" aria-label="触れない時間帯 ${i+1} 終了"></div>${button('schedule-away-remove','削除','btn tiny danger',`data-pid="${esc(p.id)}" data-index="${i}"`)}</div>`).join(''):'<p class="note">未登録：従来どおり帰投直後に複製します。</p>'}
  <p class="note">例：0900〜1800、2300〜0700。日付をまたぐ設定も可能です。登録済みの出発予定は自動変更しません。</p></section>`;
  const detail=`<details class="panel section" ${ui.scheduleDetails?'open':''} id="schedule-details"><summary>遠征の補正・補給費設定</summary>${p.rows.map(row=>renderRow(row,'preset',p.id)).join('')}${button('add-row','＋ 遠征を追加','btn',`data-pid="${esc(p.id)}"`)}</details>`;
  const legacy=state.monthlyRows.length?`<details class="panel section"><summary>旧月次遠征データ（互換設定）</summary><p class="note">従来の月次加算設定です。必要に応じて新規プリセットへ移行できます。</p>${state.monthlyRows.map(row=>renderRow(row,'monthly','')).join('')}${button('migrate-monthly','新規プリセットに移行','btn primary')}</details>`:'';
  const top=`<section class="panel section"><div class="sectionhead"><div><h2>運用プリセット</h2><p>設計する運用パターンを選択し、1日の基準時刻と触れない時間帯を設定します。</p></div><div class="row-wrap">${button('clone-preset','プリセットをコピー')}${button('add-preset','＋ 新規')}</div></div>
  <div class="preset-list">${state.presets.map(x=>`<button type="button" class="preset-tab ${x.id===p.id?'selected':''}" data-action="choose-preset" data-pid="${esc(x.id)}">${esc(x.name)}<span>${x.rows.reduce((n,r)=>n+E.clamp(r.count,0,200),0)}回 / 日</span></button>`).join('')}</div>
  <div class="row-wrap"><div class="field grow"><label>プリセット名</label><input type="text" data-change="preset-name" data-pid="${esc(p.id)}" value="${esc(p.name)}" maxlength="50"></div>${button('remove-preset','削除','btn danger',`data-pid="${esc(p.id)}"`)}</div>
- <div class="schedule-day-start"><div class="field schedule-clock"><label>1日の基準時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="0700" value="${E.clockDigits(dayStart)}" data-change="schedule-base" data-pid="${esc(p.id)}" aria-label="1日の基準時刻（4桁）"></div><div class="note">このプリセットの1日：<strong>${E.clockString(dayStart)} 〜 ${E.clockString(dayStart+1440)}</strong>。超過する予定も登録できますが、警告を表示します。</div></div>
+ <div class="schedule-day-start"><div class="field schedule-clock"><label>1日の基準時刻（4桁）</label><input type="text" inputmode="numeric" pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" placeholder="0500" value="${E.clockDigits(dayStart)}" data-change="schedule-base" data-pid="${esc(p.id)}" aria-label="1日の基準時刻（4桁）"></div><div class="note">このプリセットの1日：<strong>${E.clockString(dayStart)} 〜 ${E.clockString(dayStart+1440)}</strong>。超過する予定も登録できますが、警告を表示します。</div></div>
  ${unavailableUI}
  </section>`;
  if(!p.scheduleEnabled){
@@ -915,13 +931,13 @@ function renderScheduler(){
  }
  const audit=E.scheduleAudit(p,EXP);
  const status=`<section class="panel section"><div class="row-between"><div><h2>遠征計画</h2><p class="note">合計 ${audit.runs.length}回 · 配置済 ${audit.placed}回 · 未配置 ${audit.missing}回</p></div><div class="row-wrap">${button('schedule-add','＋ 遠征を追加','btn primary',`data-pid="${esc(p.id)}"`)}${button('schedule-sort','艦隊・時刻順','btn',`data-pid="${esc(p.id)}"`)}<span class="chip ${audit.complete&&audit.runs.length?'green':'amber'}">${!audit.runs.length?'未登録':audit.missing?'未配置・要確認':audit.hard.length?'注意事項あり':'時刻割当完了'}</span></div></div>
- <p class="note">遠征の種類・艦隊枠・出発時刻を登録します。開始時刻は0830のように4桁で入力します。基準時刻より前は翌日の出発です。遠征複製は帰投後の操作可能な時刻を使用します。時刻未設定でも収支を計算できます。</p>
+ <p class="note">遠征の種類・艦隊枠・出発時刻を登録します。開始時刻は900→0900のように3桁入力を補完します。2400・2500などの翌日表記も使えます。基準時刻より前の通常時刻は翌日の出発です。遠征複製は帰投後の操作可能な時刻を使用します。時刻未設定でも収支を計算できます。</p>
  <div class="sumstrip"><span><strong>1日分の獲得期待値：</strong>${['fuel','ammo','steel','bauxite'].map((k,i)=>`${['燃','弾','鋼','ボ'][i]} ${fmt(period.earned[k])}`).join(' ／ ')}</span><span class="muted">${E.formatOccupation(period.occupation.totalMinutes)} / 延べ</span></div>
  <p class="note">この金額は予定が未配置でもプリセット内の全遠征を集計した値です。編成未登録時は補給費を差し引いていません。月次遠征は運用設定で暦月1回までの概算計上となります。</p>
  ${[...new Set(audit.runs.filter(x=>x.exp.monthly&&audit.runs.filter(y=>y.exp.id===x.exp.id).length>1).map(x=>x.exp.name))].map(name=>`<div class="warning">月次遠征「${esc(name)}」が同じプリセットに複数あります。</div>`).join('')}
  ${audit.hard.map(x=>`<div class="warning">要確認（登録済み）：${esc(x)}</div>`).join('')}
  ${audit.soft.map(x=>`<div class="notice">艦娘編成の重複：${esc(x)}</div>`).join('')}
- ${audit.runs.filter(x=>x.start!==null&&x.start!==undefined&&x.start!==''&&E.nextAvailableMinute(p,E.dayAbsoluteMinute(x.start,dayStart))>E.dayAbsoluteMinute(x.start,dayStart)).map(x=>`<div class="notice">${esc(x.exp.name)}（${esc(E.clockString(E.dayAbsoluteMinute(x.start,dayStart)))}発）は、触れない時間帯に出発する設定です。</div>`).join('')}
+ ${audit.runs.filter(x=>x.start!==null&&x.start!==undefined&&x.start!==''&&E.nextAvailableMinute(p,E.dayAbsoluteMinute(x.start,dayStart)+(Number(x.dayOffset)||0)*1440)>E.dayAbsoluteMinute(x.start,dayStart)+(Number(x.dayOffset)||0)*1440).map(x=>`<div class="notice">${esc(x.exp.name)}（${esc(E.clockString(E.dayAbsoluteMinute(x.start,dayStart)+(Number(x.dayOffset)||0)*1440))}発）は、触れない時間帯に出発する設定です。</div>`).join('')}
  ${audit.runs.length?audit.runs.map(x=>renderScheduleEntry(p,x)).join(''):'<div class="empty">遠征が登録されていません。「＋ 遠征を追加」から運用計画を作成します。</div>'}
  <div class="row-wrap" style="margin-top:12px">${button('schedule-disable','時刻・艦隊枠の割当を解除','btn danger',`data-pid="${esc(p.id)}"`)}</div>
  </section>`;
@@ -1128,10 +1144,10 @@ function handleClick(e){
    else if(a==='simple-remove-block')state.simpleBlocks=state.simpleBlocks.filter(x=>x.id!==d.bid);
    else if(a==='simple-add-row'&&block)block.rows.push({id:uid(),expId:'02',count:1,daihatsu:false,kira:false});
    else if(a==='simple-remove-row'&&block)block.rows=block.rows.filter(x=>x.id!==d.rid);
-   else if(a==='simple-export'&&block){const p={id:uid(),name:String(block.name||'').trim()||'簡易計算から出力',dayStart:0,rows:block.rows.filter(x=>EXP_MAP.has(x.expId)&&x.count>0).map(x=>({...E.simpleExpRow(x,EXP_MAP.get(x.expId),state.settings),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);ui.selectedPreset=p.id;ui.tab='scheduler';}
+   else if(a==='simple-export'&&block){const p={id:uid(),name:String(block.name||'').trim()||'簡易計算から出力',dayStart:300,rows:block.rows.filter(x=>EXP_MAP.has(x.expId)&&x.count>0).map(x=>({...E.simpleExpRow(x,EXP_MAP.get(x.expId),state.settings),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);ui.selectedPreset=p.id;ui.tab='scheduler';}
   });return;
  }
- if(a==='migrate-monthly'){if(!confirm('旧月次遠征を新規プリセットに移行します。運用設定で適用日を指定してください。'))return;update(()=>{const p={id:uid(),name:'月次遠征実施日',dayStart:0,rows:state.monthlyRows.map(x=>({...structuredClone(x),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);state.monthlyRows=[];ui.selectedPreset=p.id;});return;}
+ if(a==='migrate-monthly'){if(!confirm('旧月次遠征を新規プリセットに移行します。運用設定で適用日を指定してください。'))return;update(()=>{const p={id:uid(),name:'月次遠征実施日',dayStart:300,rows:state.monthlyRows.map(x=>({...structuredClone(x),id:uid()})),scheduleEnabled:true,schedule:[]};state.presets.push(p);state.monthlyRows=[];ui.selectedPreset=p.id;});return;}
  if(a==='schedule-sort'){update(()=>{const p=presetById(d.pid);if(p)sortScheduleDepartures(p);});return;}
  if(a==='schedule-enable'){update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=true;p.schedule=[];}});return}
  if(a==='schedule-disable'){if(!confirm('このプリセットの時刻と艦隊枠の割当を解除しますか？　遠征と回数は残ります。'))return;update(()=>{const p=presetById(d.pid);if(p){p.scheduleEnabled=false;p.schedule=[];}});return}
@@ -1151,7 +1167,7 @@ function handleClick(e){
  if(a==='schedule-remove'){update(()=>{const p=presetById(d.pid);if(!p)return;const s=p.schedule?.find(x=>x.id===d.sid);if(!s)return;const r=p.rows.find(x=>x.id===s.rowId);p.schedule=p.schedule.filter(x=>x.id!==s.id);if(r){r.count=Math.max(0,r.count-1);if(r.count===0)p.rows=p.rows.filter(x=>x.id!==r.id);}});return}
  update(()=>{
   if(a==='add-preset'||a==='clone-preset'){
-   const current=presetById(ui.selectedPreset);const p=a==='clone-preset'&&current?structuredClone(current):{id:'',name:`プリセット${state.presets.length+1}`,dayStart:0,rows:[]};p.id=uid();if(a==='clone-preset'){p.name+=' のコピー';{const remap=new Map();p.rows.forEach(r=>{const old=r.id;r.id=uid();remap.set(old,r.id)});if(p.schedule)p.schedule.forEach(s=>{s.id=uid();s.rowId=remap.get(s.rowId)||s.rowId});}}state.presets.push(p);ui.selectedPreset=p.id;
+   const current=presetById(ui.selectedPreset);const p=a==='clone-preset'&&current?structuredClone(current):{id:'',name:`プリセット${state.presets.length+1}`,dayStart:300,rows:[]};p.id=uid();if(a==='clone-preset'){p.name+=' のコピー';{const remap=new Map();p.rows.forEach(r=>{const old=r.id;r.id=uid();remap.set(old,r.id)});if(p.schedule)p.schedule.forEach(s=>{s.id=uid();s.rowId=remap.get(s.rowId)||s.rowId});}}state.presets.push(p);ui.selectedPreset=p.id;
   }else if(a==='remove-preset'){
    if(state.presets.length<=1){alert('最低1つのプリセットは必要です。');return}
    if(!confirm('プリセットを削除しますか？週間割当や月間例外の参照も削除します。'))return;
@@ -1185,7 +1201,7 @@ function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)ret
   if(!period)return;
   const parsed=E.parseClockDigits(t.value);
   if(parsed===undefined||parsed===null||parsed===period[d.field==='start'?'end':'start']){
-   alert('触れない時間帯は開始・終了を異なる4桁時刻で指定してください（例：0900〜1800）。');render();return;
+   alert('触れない時間帯は開始・終了を異なる時刻（0000〜2359、3〜4桁）で指定してください。');render();return;
   }
   update(()=>{period[d.field]=parsed;});return;
  }
@@ -1193,7 +1209,7 @@ function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)ret
   const p=presetById(d.pid);
   if(!p)return;
   const parsed=E.parseClockDigits(t.value);
-  if(parsed===undefined||parsed===null){alert('1日の基準時刻は 0000〜2359 の4桁数字で入力してください（例：0700）。');render();return;}
+  if(parsed===undefined||parsed===null){alert('1日の基準時刻は 0000〜2359 の3〜4桁数字で入力してください（例：0500）。');render();return;}
   // Day-boundary conflicts are advisory: keep the edited value and show warnings.
   update(()=>{p.dayStart=parsed;});return;
  }
@@ -1205,11 +1221,10 @@ function handleChange(e){const t=e.target,d=t.dataset,type=d.change;if(!type)ret
      if(t.value){if(changed.probMode==='common')changed.probMode='fleet';if(changed.bonusMode==='none')changed.bonusMode='fleet';}});
    return;
   }
-  const parsed=d.field==='start'?E.parseClockDigits(t.value):null;
-  if(d.field==='start'&&parsed===undefined){alert('開始時刻は 0000〜2359 の4桁数字で入力してください（例：0830）。');render();return;}
-  const value=d.field==='start'?parsed:t.value;
+  const parsed=d.field==='start'?E.departureClock(t.value,E.dayStartMinutes(p)):null;
+  if(d.field==='start'&&parsed===undefined){alert('開始時刻は3〜4桁の数字で入力してください（例：900、0900、2500。分は00〜59）。');render();return;}
   // Overlap/day-boundary issues are warnings, not blockers.
-  update(()=>{entry[d.field]=value;});return;
+  update(()=>{if(d.field==='start')Object.assign(entry,parsed);else entry[d.field]=t.value;});return;
  }
  update(()=>{
  const num=new Set(['count','greatPct','bonusPct','costFuel','costAmmo','days','level','fuel','ammo','daihatsu','tokudai','tank','katsu','armed','drum','star']);
