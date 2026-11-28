@@ -50,6 +50,15 @@ assert.throws(()=>lib.extract({},master.sourceSha));
 assert.equal(E.equipmentMaster(1).id,1);
 assert.equal(E.shipMaster(487).slots,master.ships.find(x=>x[0]===487)[6]);
 assert.ok(master.ships.every(x=>Number.isInteger(x[6])&&x[6]>=0));
+assert.ok(master.ships.every(x=>typeof x[7]==='boolean'));
+for(const [id,canCarry] of [[487,true],[445,false],[450,true],[491,false],[372,true],[668,false]]){
+ assert.equal(E.shipMaster(id).canCarryLandingCraft,canCarry);
+}
+assert.equal(E.equipmentSlotCount({shipId:'487',items:[]}),3);
+assert.equal(E.equipmentSlotCount({shipId:'487',items:[{id:75,slot:'i5'}]}),3);
+assert.equal(E.equipmentTotals({ships:[{shipId:'487',items:[{id:75,slot:'i5'}]}]}).drum,0);
+assert.equal(E.equipmentSlotCount({shipId:'999999',items:[{id:75,slot:'i4'}]}),4);
+assert.equal(E.equipmentSlotCount({shipId:'999999',slotCount:4,items:[]}),4);
 const sparse={items:[{id:75,slot:'i3'},{id:68,rf:4},{id:1,slot:'ix'}]};
 assert.equal(E.shipEquipmentSlots(sparse).get('i1').id,68);
 assert.equal(E.shipEquipmentSlots(sparse).has('i2'),false);
@@ -74,6 +83,10 @@ const picker=makePicker(E);
 assert.equal(picker.matchingShips('','all',[]).length,0);
 assert.equal(picker.matchingShips('','all',['base','middle','final']).length,master.ships.length);
 assert.equal(picker.matchingShips('','all').length,master.ships.filter(x=>['final','standalone'].includes(x[5])).length);
+assert.ok(picker.matchingShips('鬼怒','軽巡洋艦',['final'],true).some(x=>x[0]===487));
+assert.equal(picker.matchingShips('矢矧改二乙','軽巡洋艦',['final'],true).length,0);
+assert.equal(picker.matchingShips('秋津洲','水上機母艦',['base'],true).length,0);
+assert.ok(picker.matchingShips('秋津洲','水上機母艦',['final'],true).some(x=>x[0]===450));
 for(const [id,name,type,fuel,ammo,stage] of master.ships){
  const initial=picker.shipPickerInitialStages(id);
  assert.ok(initial.includes('final'));
