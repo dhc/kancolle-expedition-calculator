@@ -301,7 +301,7 @@ const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,Number.isFinite(Number(n))?Number
 const EQUIPMENT=root.KC_EQUIPMENT_RULES.equipment;
 const DRUM_SUCCESS=root.KC_EQUIPMENT_RULES.drumSuccess;
 const DRUM_GREAT=root.KC_EQUIPMENT_RULES.drumGreat;
-const SPECIAL_PROB_IDS=new Set(root.KC_EQUIPMENT_RULES.specialProbIds);
+const FLAGSHIP_PROB_IDS=new Set(root.KC_EQUIPMENT_RULES.flagshipProbIds);
 function shipEquipmentSlots(ship){
  const slots=new Map();
  for(const item of ship.items||[]){if(item?.id&&item.slot)slots.set(item.slot,item);}
@@ -364,18 +364,29 @@ function equipmentTotals(fleet){
 }
 function getProb(row,fleet,commonPercent,exp){
  if(row.probMode==='manual')return {value:clamp(row.greatPct,0,100)/100,description:'個別指定'};
- if(row.probMode==='fleet'&&fleet){
-   const ships=fleet.ships||[];const kira=ships.filter(x=>x.kira).length;
-   const dr=DRUM_GREAT[exp?.id];const t=equipmentTotals(fleet);
-   if(dr && kira>=4 && t.drum>=dr[1] && t.drumShips>=dr[0])return {value:1,description:'ドラム缶条件（確定）'};
-   if(dr)return {value:clamp(commonPercent,0,100)/100,description:'共通率で代用',warning:'ドラム缶型の大成功率を自動判定できないため、共通設定を使用'};
-   if(SPECIAL_PROB_IDS.has(exp?.id))return {value:clamp(commonPercent,0,100)/100,description:'共通率で代用',warning:'特殊判定型のため共通大成功率を使用'};
-   if(kira===ships.length&&kira===6)return {value:1,description:'6隻全キラ'};
-   if(kira===ships.length&&kira===5)return {value:.95,description:'5隻全キラ（推定）'};
-   if(kira===ships.length&&kira===4)return {value:.80,description:'4隻全キラ（推定）'};
-   return {value:0,description:'通常型：全キラ条件外'};
+ const common=clamp(commonPercent,0,100)/100;
+ if(row.probMode!=='fleet')return {value:common,description:'共通設定'};
+ const ships=fleet?.ships||[];
+ if(!ships.length)return {value:common,description:'編成情報なし→共通'};
+ const kira=ships.filter(ship=>ship.kira).length;
+ const expId=exp?.id,dr=DRUM_GREAT[expId];
+ if(dr){
+  const totals=equipmentTotals(fleet),required=DRUM_SUCCESS[expId];
+  if(required&&(totals.drumShips<required[0]||totals.slottedDrums<required[1])){
+   return {value:0,description:'装備枠のドラム缶が成功条件未達'};
+  }
+  const boosted=totals.drumShips>=dr[0]&&totals.slottedDrums>=dr[1];
+  const percent=Math.min(100,15*kira+(boosted?41:6));
+  return {value:percent/100,description:percent===100?'ドラム缶型（確定）':'ドラム缶型（推定）'};
  }
- return {value:clamp(commonPercent,0,100)/100,description:row.probMode==='fleet'?'艦隊未設定→共通':'共通設定'};
+ if(FLAGSHIP_PROB_IDS.has(expId)){
+  const level=Number(ships[0].level);
+  if(!Number.isInteger(level)||level<1)return {value:common,description:'旗艦Lv不明→共通'};
+  const percent=Math.min(100,Math.floor(16+15*kira+Math.sqrt(level)+level/10));
+  return {value:percent/100,description:'旗艦Lv型（推定）'};
+ }
+ if(kira!==ships.length||kira<2)return {value:0,description:'通常型：全キラ条件外'};
+ return {value:Math.min(100,15*kira+21)/100,description:kira>=6?'全キラ型（確定）':'全キラ型（推定）'};
 }
 function getBonus(row,fleet){
  if(row.bonusMode==='manual')return {percent:clamp(row.bonusPct||0,0,100),automatic:false,parts:null};
@@ -518,7 +529,7 @@ function simpleExpRow(row,exp,settings){
  const formation=SIMPLE_FORMATIONS[exp.id];
  const ships=formation?.map(([fuel,ammo])=>({fuel,ammo,kira:!!row.kira}))||[];
  const fleet=formation?{id:'simple-standard',ships}:null;
- const prob=row.kira?(formation&&!DRUM_GREAT[exp.id]&&!SPECIAL_PROB_IDS.has(exp.id)?(ships.length===6?100:ships.length===5?95:ships.length===4?80:clamp(settings.commonGreatPct,0,100)):clamp(settings.commonGreatPct,0,100)):0;
+ const prob=row.kira?clamp(settings.commonGreatPct,0,100):0;
  const cost=fleet?calcFuelCost({costMode:'fleet'},exp,fleet):null;
  return {...makeRow(exp.id),id:row.id,count:Math.round(clamp(row.count,0,200)),probMode:'manual',greatPct:prob,bonusMode:'manual',bonusPct:row.daihatsu?20:0,costMode:cost?'manual':'fleet',costFuel:cost?.fuel??0,costAmmo:cost?.ammo??0};
 }
@@ -877,7 +888,6 @@ function renderRow(row,scope,pid){
  const monthly=scope==='monthly';const exp=EXP_MAP.get(row.expId);if(!exp)return '';
  const fleet=fleetById(row.fleetId);const v=E.expeditionOutcome(row,exp,state.fleets,state.settings),active=ui.expandedRow===row.id;
  const attr=`data-scope="${scope}" data-pid="${esc(pid)}" data-rid="${esc(row.id)}"`;
- const warn=v.prob.warning?`<div class="warning">${esc(v.prob.warning)}</div>`:'';
  const drumWarning=E.drumRequirementWarning(fleet,exp.id);
  const rateText=`大成功 ${fmt(v.prob.value*100,0)}%（${esc(v.prob.description)}）`;
  const benefit=`大発補正 +${fmt(v.bonus.percent,2)}%`;
@@ -900,7 +910,7 @@ function renderRow(row,scope,pid){
  ${numberField('手動：燃料消費 / 回',row.costFuel,`data-change="row" data-field="costFuel" min="0" max="5000" step="1" ${attr} ${row.costMode!=='manual'?'disabled':''}`,'grow')}
  ${numberField('手動：弾薬消費 / 回',row.costAmmo,`data-change="row" data-field="costAmmo" min="0" max="5000" step="1" ${attr} ${row.costMode!=='manual'?'disabled':''}`,'grow')}
  </div><p class="note">この遠征の補給消費率：燃料${exp.consumptionPct.fuel}%・弾薬${exp.consumptionPct.ammo}%。編成に各艦の最大補給量（ケッコン前）を入力すると消費量を推算します。</p>
- ${warn}<div class="mini-grid">${['fuel','ammo','steel','bauxite'].map((k,i)=>`<div class="mini-stat"><span class="smallhead">${['燃料','弾薬','鋼材','ボーキ'][i]}（1回）</span><strong>${fmt(v.earned[k])}</strong><div class="subtle">通常 ${fmt(v.detail[k].normal)} / 大成功 ${fmt(v.detail[k].great)}</div></div>`).join('')}</div></div>`:''}</div>`;
+ <div class="mini-grid">${['fuel','ammo','steel','bauxite'].map((k,i)=>`<div class="mini-stat"><span class="smallhead">${['燃料','弾薬','鋼材','ボーキ'][i]}（1回）</span><strong>${fmt(v.earned[k])}</strong><div class="subtle">通常 ${fmt(v.detail[k].normal)} / 大成功 ${fmt(v.detail[k].great)}</div></div>`).join('')}</div></div>`:''}</div>`;
 }
 // Time accounting: sum of mission durations times departures, without scheduling.
 function renderOccupation(preset){
@@ -1158,7 +1168,7 @@ function simpleTable(out){
 }
 function renderSimple(){
  const blocks=simpleBlocks(),calc=E.simpleCalculate(blocks,state.settings,EXP);
- return `<div class="stack"><section class="panel section"><h2>簡易収支計算器</h2><p class="note">現在の遠征回数を入力し、倍率を掛けて合算します。艦隊や時刻の設定は不要です。</p><p class="note">大発ありは＋20%の仮定、キラなしは通常成功、キラありは既存の標準推定または共通大成功率（${fmt(state.settings.commonGreatPct)}%）を使用。最小編成・補給費未登録の遠征は純収支を表示しません。</p></section>
+ return `<div class="stack"><section class="panel section"><h2>簡易収支計算器</h2><p class="note">現在の遠征回数を入力し、倍率を掛けて合算します。艦隊や時刻の設定は不要です。</p><p class="note">大発ありは＋20%の仮定、キラなしは通常成功、キラありは共通大成功率（${fmt(state.settings.commonGreatPct)}%）を使用。最小編成・補給費未登録の遠征は純収支を表示しません。</p></section>
  ${blocks.map((b,i)=>`<section class="panel section"><div class="row-wrap"><strong>条件 ${i+1}</strong><div class="field grow"><input type="text" placeholder="条件名（任意）" aria-label="条件名" data-change="simple-block" data-field="name" data-bid="${esc(b.id)}" value="${esc(b.name)}"></div>${button('simple-remove-block','削除','btn tiny danger',`data-bid="${esc(b.id)}"`)}</div>
  ${b.rows.map(row=>{const attr=`data-bid="${esc(b.id)}" data-rid="${esc(row.id)}"`;return `<div class="simple-row">${expeditionPicker(row.expId,null,attr)}${numberField('回数',row.count,`min="0" max="200" step="1" data-change="simple-row" data-field="count" ${attr}`,'count')}<label class="check-field"><input type="checkbox" data-change="simple-row" data-field="daihatsu" ${attr} ${row.daihatsu?'checked':''}>大発</label><label class="check-field"><input type="checkbox" data-change="simple-row" data-field="kira" ${attr} ${row.kira?'checked':''}>キラ</label>${button('simple-remove-row','削除','btn tiny danger',attr)}</div>`;}).join('')}
  ${button('simple-add-row','＋ 遠征を追加','btn',`data-bid="${esc(b.id)}"`)}
@@ -1663,7 +1673,7 @@ document.addEventListener('toggle',e=>{
 window.addEventListener('resize',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu));
 window.addEventListener('scroll',()=>document.querySelectorAll('.exp-picker[open]').forEach(positionExpeditionMenu),{passive:true});
 const oldRender=render;
-render=function(){oldRender();const summary=document.querySelector('.summary');if(!summary)return;const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（各遠征の「個別指定」「編成から推定」で上書き可）</span>`;summary.appendChild(bar);};
+render=function(){oldRender();const summary=document.querySelector('.summary');if(!summary)return;const bar=document.createElement('div');bar.className='row-wrap';bar.style.cssText='margin-top:12px;padding-top:12px;border-top:1px solid #e5eef3;';bar.innerHTML=`<span class="note strong">共通大成功率</span><input type="number" min="0" max="100" step="1" value="${state.settings.commonGreatPct}" data-change="common" style="width:75px"><span class="note">%　（編成から推定できない行や「共通確率」の行、簡易計算の「キラ」ありに使用）</span>`;summary.appendChild(bar);};
 schedulePresets();
 persist();
 render();
