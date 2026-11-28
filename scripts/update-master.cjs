@@ -45,8 +45,8 @@ function extract(raw,sha){
  assert(a.api_mst_stype.every(x=>int(x.api_id,1)&&typeof x.api_name==='string'&&x.api_name.trim()),'invalid ship type');
  const player=a.api_mst_ship.filter(x=>x.api_id<1500&&x.api_sortno>0);
  const stages=remodelStages(player,a.api_mst_shipupgrade);
- const ships=player.map(x=>[x.api_id,x.api_name,x.api_stype,x.api_fuel_max,x.api_bull_max,stages.get(x.api_id)]).sort((a,b)=>a[0]-b[0]);
- assert(ships.length>=800&&ships.every(([id,name,type,fuel,ammo])=>int(id,1)&&typeof name==='string'&&name.trim()&&types[type]&&int(fuel)&&int(ammo)),'invalid player ship data');
+ const ships=player.map(x=>[x.api_id,x.api_name,x.api_stype,x.api_fuel_max,x.api_bull_max,stages.get(x.api_id),x.api_slot_num]).sort((a,b)=>a[0]-b[0]);
+ assert(ships.length>=800&&ships.every(([id,name,type,fuel,ammo,stage,slots])=>int(id,1)&&typeof name==='string'&&name.trim()&&types[type]&&int(fuel)&&int(ammo)&&int(slots)),'invalid player ship data');
  unique(ships.map(x=>x[0]),'ship');
  assert(ships.some(x=>x[0]===487),'Kinu Kai Ni missing');
  const equipment=a.api_mst_slotitem.map(x=>[x.api_id,x.api_name,x.api_type]).sort((a,b)=>a[0]-b[0]);
@@ -56,7 +56,7 @@ function extract(raw,sha){
  const expeditions=a.api_mst_mission.map(x=>({id:x.api_disp_no,apiId:x.api_id,name:x.api_name,minutes:x.api_time,fuelPct:Math.round(x.api_use_fuel*100),ammoPct:Math.round(x.api_use_bull*100),deckNum:x.api_deck_num,sampleFleet:x.api_sample_fleet,resetType:x.api_reset_type,damageType:x.api_damage_type})).sort((a,b)=>a.apiId-b.apiId);
  assert(expeditions.length>=61&&expeditions.every(x=>typeof x.id==='string'&&x.id.length&&int(x.apiId,1)&&typeof x.name==='string'&&x.name.trim()&&int(x.minutes,1)&&int(x.fuelPct)&&x.fuelPct<=100&&int(x.ammoPct)&&x.ammoPct<=100&&int(x.deckNum)&&Array.isArray(x.sampleFleet)&&int(x.resetType)&&int(x.damageType)),'invalid expedition data');
  unique(expeditions.map(x=>x.id),'expedition display');unique(expeditions.map(x=>x.apiId),'expedition API');
- return {schema:2,source:SOURCE,sourceSha:sha,types,ships,equipment,expeditions};
+ return {schema:3,source:SOURCE,sourceSha:sha,types,ships,equipment,expeditions};
 }
 function changes(old,next){
  const out={};

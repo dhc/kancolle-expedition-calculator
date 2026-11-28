@@ -48,6 +48,20 @@ const removed=JSON.parse(JSON.stringify(master));removed.ships=removed.ships.fil
 assert.throws(()=>lib.guard(master,removed,w.KC_EXPEDITION_RULES));
 assert.throws(()=>lib.extract({},master.sourceSha));
 assert.equal(E.equipmentMaster(1).id,1);
+assert.equal(E.shipMaster(487).slots,master.ships.find(x=>x[0]===487)[6]);
+assert.ok(master.ships.every(x=>Number.isInteger(x[6])&&x[6]>=0));
+const sparse={items:[{id:75,slot:'i3'},{id:68,rf:4},{id:1,slot:'ix'}]};
+assert.equal(E.shipEquipmentSlots(sparse).get('i1').id,68);
+assert.equal(E.shipEquipmentSlots(sparse).has('i2'),false);
+assert.equal(E.shipEquipmentSlots(sparse).get('ix').id,1);
+const drumShip=count=>({items:Array.from({length:count},()=>({id:75}))});
+const drumFleet={ships:[drumShip(2),drumShip(1),drumShip(1)],extraEquipment:{drum:1}};
+assert.equal(E.equipmentTotals(drumFleet).drumShips,3);
+assert.equal(E.equipmentTotals(drumFleet).drum,5);
+assert.equal(E.drumRequirementWarning(drumFleet,'37'),'');
+drumFleet.ships.pop();
+assert.match(E.drumRequirementWarning(drumFleet,'37'),/2隻・3個/);
+assert.equal(E.drumRequirementWarning(drumFleet,'24'),'');
 console.log('Master consistency, runtime resolution, migration, manual overrides, unknown IDs, and update guards: OK');
 
 const stage=id=>master.ships.find(x=>x[0]===id)?.[5];
